@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+  EASY_TEAM
+  CUSTOMER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String?
+  password     String
+  role         Role     @default(EMPLOYEE)
+  createdAt    DateTime @default(now())
+  tenantId     String?
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id])
+  createdById  String?
+  createdBy    User?    @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers User[]   @relation("UserCreator")
+}
+model Tenant {
+  id                String   @id @default(cuid())
+  businessName      String
+  businessPhone     String?
+  dbHost            String
+  dbUser            String
+  dbPassword        String
+  dbName            String
+  
+  // Update this line to allow for longer tokens
+  metaToken         String?  @db.VarChar(255)
+  dbPort            String?
+  wabaId            String?
+  phoneNumberId     String
+  users             User[]
+  createdAt         DateTime @default(now())
+  automationRules   AutomationRule[]
+  automationLogs    AutomationLog[]
+}
+
+model AutomationRule {
+  id           String   @id @default(cuid())
+  tenantId     String
+  eventType    String   
+  templateName String   
+  delayValue   Int      @default(0)
+  delayUnit    String   @default("Minutes")
+  isActive     Boolean  @default(true)
+  
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  logs         AutomationLog[]
+}
+
+model AutomationLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  ruleId     String
+  externalId String   // ID from the legacy SQL database (e.g., bill id)
+  status     String   // "SENT" or "FAILED"
+  createdAt  DateTime @default(now())
+  
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  rule       AutomationRule @relation(fields: [ruleId], references: [id])
+}
+
+model client {
+  id          Int      @id @default(autoincrement())
+  name        String?  @db.VarChar(111)
+  cont        String?  @db.VarChar(111)
+  email       String?  @db.VarChar(111)
+  active      Int?     @default(0)
+  branch_id   Int      @default(1)
+  doj         DateTime @default(now()) @db.Timestamp(0)
+}
