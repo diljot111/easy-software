@@ -114,6 +114,7 @@ export default function ClientManagement() {
         </header>
 
         <div className="search-container">
+          <Search className="search-icon" size={16} />
           <input
             type="text"
             placeholder="Search by name or email..."

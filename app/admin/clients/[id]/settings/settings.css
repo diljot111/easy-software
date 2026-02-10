@@ -413,8 +413,8 @@
 }
 
 .settings-template-name {
-    font-size: 0.625rem;
-    font-weight: 900;
+    font-size: 0.825rem;
+    font-weight: 700;
     color: #2563eb;
     text-transform: uppercase;
     letter-spacing: -0.025em;
@@ -431,11 +431,10 @@
 }
 
 .settings-template-body {
-    font-size: 0.625rem;
+    font-size: 0.825rem;
     color: #64748b;
     line-height: 1.4;
     margin-bottom: 0.75rem;
-    font-style: italic;
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 3;
