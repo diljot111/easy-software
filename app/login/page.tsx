@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { loginUser } from "../actions/login";
-import { Lock, Mail, Terminal, Loader2, ShieldCheck } from "lucide-react";
+import { loginUser } from "../actions/login"; // Ensure this path is correct
+import { Lock, User, Terminal, Loader2, ShieldCheck } from "lucide-react";
 import { toast, Toaster } from "sonner";
 
 export default function LoginPage() {
@@ -16,17 +16,22 @@ export default function LoginPage() {
 
     const formData = new FormData(event.currentTarget);
 
+    // DEBUG: Check what is actually being sent
+    console.log("Submitting:", Object.fromEntries(formData));
+
     try {
       const result = await loginUser(formData);
 
       if (result.success) {
         toast.success("Login successful");
-        router.replace(result.path || "/admin/clients");
+        // Redirect to the path returned by the server, or default to admin
+        router.replace(result.path || "/admin/clients"); 
         return;
       }
 
       toast.error(result.error || "Invalid credentials");
     } catch (err) {
+      console.error(err);
       toast.error("An error occurred. Please try again.");
     } finally {
       setLoading(false);
@@ -54,15 +59,18 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">
-              Email Address
+              Username or Email
             </label>
             <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+              {/* Changed Icon to User since it might not be an email */}
+              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+              
+              {/* 🔹 FIX: Changed type="email" to type="text" */}
               <input
                 name="email" 
                 required
-                type="email"
-                placeholder="name@company.com"
+                type="text" 
+                placeholder="admin" 
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-sm text-slate-900 focus:ring-2 ring-blue-600 outline-none transition-all"
               />
             </div>
