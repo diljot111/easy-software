@@ -35,7 +35,7 @@ export async function createEasyTeamMember(formData: FormData) {
         password: hashedPassword,
         role: "EASY_TEAM",
         // If no creatorId is found, MySQL may fail if this field is required
-        createdById: creatorId, 
+        created_by_id: creatorId, 
       },
     });
 
@@ -67,7 +67,7 @@ export async function createCustomer(formData: FormData) {
         phone,
         password: hashedPassword,
         role: "CUSTOMER",
-        createdById: creatorId,
+        created_by_id: creatorId,
       },
     });
 
@@ -87,11 +87,11 @@ export async function getAllUsers() {
     const members = await prisma.user.findMany({
       where: { role: { in: ["EASY_TEAM", "CUSTOMER"] } },
       include: {
-        createdBy: { 
+        created_by: { 
           select: { name: true, role: true }
         }
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { created_at: "desc" },
     });
     // Ensure IDs are returned as numbers for the frontend logic
     return { success: true, members };

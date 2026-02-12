@@ -4,62 +4,57 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("🔐 Starting Admin Password Reset...");
+  console.log("🔐 Starting Admin Reset...");
 
   // 1. Hash the password
   const hashedPassword = await bcrypt.hash("admin123", 10);
 
-  // 2. FORCE UPDATE: We cast to 'any' to bypass TypeScript errors
-  // This helps if your prisma client is out of sync with the DB
-  const userClient = prisma.user as any;
+  // 2. Ensure a Tenant Exists (Admins usually need a tenant)
+  console.log("🏢 Ensuring default tenant exists...");
+  const tenant = await prisma.tenant.upsert({
+    where: { id: "default-tenant" },
+    update: {},
+    create: {
+      id: "default-tenant",
+      business_name: "Master Admin HQ",
+      db_host: "localhost",
+      db_user: "root",
+      db_password: "",
+      db_name: "easy_automation",
+    },
+  });
 
-  console.log("🔎 Attempting to update admin user...");
+  console.log("🔎 Checking for admin user...");
 
-  try {
-    // 🔹 ATTEMPT 1: Try finding by 'email' (Standard)
-    const resultEmail = await userClient.updateMany({
-      where: { email: "admin" }, 
-      data: { password: hashedPassword },
-    });
+  // 3. Upsert Admin User (Create if new, Update if exists)
+  // We use 'admin' as the email login handle
+  const adminEmail = "admin"; 
 
-    if (resultEmail.count > 0) {
-      console.log("✅ SUCCESS! Updated user where email='admin'");
-      return;
-    }
+  const adminUser = await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {
+      password: hashedPassword,
+      role: "ADMIN", // ✅ FIXED: Must be 'ADMIN', not 'SUPER_ADMIN'
+      tenant_id: tenant.id,
+    },
+    create: {
+      email: adminEmail,
+      name: "System Admin",
+      password: hashedPassword,
+      role: "ADMIN", // ✅ FIXED
+      phone: "9999999999",
+      tenant_id: tenant.id,
+    },
+  });
 
-    // 🔹 ATTEMPT 2: Try finding by 'username' (Legacy)
-    // If the first one worked, this won't run. If first failed, we try this.
-    const resultUsername = await userClient.updateMany({
-      where: { username: "admin" },
-      data: { password: hashedPassword }, // or try 'pass' if your DB uses that
-    });
-
-    if (resultUsername.count > 0) {
-      console.log("✅ SUCCESS! Updated user where username='admin'");
-      return;
-    }
-
-    // 🔹 ATTEMPT 3: If both failed, try creating the user
-    console.log("⚠️ User not found. Creating new admin user...");
-    await userClient.create({
-      data: {
-        email: "admin",      // Try 'email' first
-        password: hashedPassword,
-        name: "Super Admin",
-        role: "SUPER_ADMIN", // Adjust if your role name is different
-      },
-    });
-    console.log("✅ CREATED new admin user.");
-
-  } catch (error: any) {
-    console.error("❌ Database Error:", error.message);
-    console.log("💡 TIP: Check your prisma/schema.prisma file to see the exact column names.");
-  }
+  console.log(`✅ SUCCESS! Admin user ready.`);
+  console.log(`👉 Login Email: ${adminEmail}`);
+  console.log(`👉 Login Password: admin123`);
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error("❌ Seed Error:", e);
     process.exit(1);
   })
   .finally(async () => {

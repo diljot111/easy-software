@@ -1,218 +1,298 @@
 "use server";
+
 import mysql, { Connection } from "mysql2/promise";
 import { prisma } from "@/lib/prisma";
 import { handleAutomatedWhatsApp } from "./whatsapp-actions";
 
 /**
- * Dynamic Variable Mapper: Maps SQL columns to Template Parameters {{1}}, {{2}}...
- * Based on rule event types.
+ * ----------------------------------------------------------------------
+ * 1. CONFIGURATION & UTILS
+ * ----------------------------------------------------------------------
  */
-function getDynamicParams(eventType: string, data: any): any[] {
-  const params = [];
-  // Standard Variable {{1}}: Customer Name
-  params.push({ type: "text", text: data.name || "Valued Customer" });
 
-  if (eventType === "New bill" || eventType.includes("Feedback")) {
-    params.push({ type: "text", text: "Mr. Algo Cracker Salon" }); // {{2}}
-    params.push({ type: "text", text: data.net_amt?.toString() || "0" }); // {{3}}
-    params.push({ type: "text", text: data.updatetime || "" }); // {{4}}
-  } else if (eventType.toLowerCase().includes("appointment")) {
-    params.push({ type: "text", text: "Mr. Algo Cracker Salon" }); // {{2}}
-    params.push({ type: "text", text: data.details || "Service" }); // {{3}}
-    params.push({ type: "text", text: data.appdate || "" }); // {{4}}
-    params.push({ type: "text", text: data.itime || "" }); // {{5}}
+function getVendorBaseUrl(tenantId: string) {
+  const urlMap: Record<string, string> = {
+    "default": "https://2025.shivsoftsindia.in/live_demo" 
+  };
+  return urlMap[tenantId] || urlMap["default"];
+}
+
+function encrypt_url(val: number) {
+  return (((val + 1000) * 7) + 5000) * 2;
+}
+
+// ⏳ Helper for Delays
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function getShortUrl(invoiceId: number, branchId: number, baseUrl: string) {
+  let longUrl = "";
+  baseUrl = "https://2025.shivsoftsindia.in/live_demo/";
+  const encryptedId = encrypt_url(invoiceId);
+  const encryptedBranchId = encrypt_url(branchId);
+  longUrl = `${baseUrl}/invoice.php?invMencr=${encryptedId}&invshopid=${encryptedBranchId}`;
+
+  try {
+    const response = await fetch("https://easyk.in/api.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        action: "generate_shorturl",
+        token: process.env.SHORTENER_API_TOKEN || "437483f79f2b09cc219faa04b262f2bd",
+        header_id: process.env.SHORTENER_HEADER_ID || "SVSaln",
+        url: longUrl
+      })
+    });
+    const result = await response.json(); 
+    if (result.status === 1 && result.short_link) return result.short_link; 
+    return longUrl; 
+  } catch (error) {
+    console.error("🔗 Shortening Failed:", error);
+    return longUrl; 
+  }
+}
+
+/**
+ * Dynamic Variable Mapper
+ */
+function getDynamicParams(eventType: string, data: any, businessName: string): any[] {
+  const params = [];
+  const evt = eventType.toLowerCase();
+
+  // 1. BILLING / FEEDBACK
+  if (evt.includes("new bill") || evt.includes("feedback")) {
+    params.push({ type: "text", text: data.name || "Customer" }); 
+    params.push({ type: "text", text: data.short_link || "https://example.com" }); 
+  } 
+  // 2. REWARDS
+  else if (evt.includes("reward")) {
+    params.push({ type: "text", text: data.points?.toString() || "0" });
+  }
+  // 3. MEMBERSHIP
+  else if (evt.includes("membership")) {
+    params.push({ type: "text", text: businessName });
+  }
+  // 4. PENDING PAYMENT
+  else if (evt.includes("pending")) {
+    const amt = data.pending || data.net_amt || "0";
+    params.push({ type: "text", text: data.name || "Customer" });
+    params.push({ type: "text", text: amt.toString() });
+    params.push({ type: "text", text: data.short_link || "" });
+  }
+  // 5. APPOINTMENTS
+  else if (evt.includes("appointment") || evt.includes("reminder") || evt.includes("confirmation")) {
+    params.push({ type: "text", text: data.name || "Customer" });
+    params.push({ type: "text", text: data.details || "Service" });
+    params.push({ type: "text", text: data.itime || "10:00 AM" });
+    params.push({ type: "text", text: businessName });
+  }
+  // 6. CANCELLATION
+  else if (evt.includes("cancel")) {
+    params.push({ type: "text", text: data.appdate || "Date" });
+    params.push({ type: "text", text: businessName });
+  }
+  // 7. RESCHEDULE
+  else if (evt.includes("re-schedule")) {
+    params.push({ type: "text", text: `${data.appdate} at ${data.itime}` });
+    params.push({ type: "text", text: businessName });
+  }
+  // 8. ENQUIRY
+  else if (evt.includes("enquiry") || evt.includes("walkin")) {
+    params.push({ type: "text", text: data.name || "Customer" });
+    params.push({ type: "text", text: businessName });
+  }
+  // 9. BIRTHDAY / ANNIVERSARY
+  else if (evt.includes("birthday") || evt.includes("anniversary")) {
+    params.push({ type: "text", text: data.name || "Customer" });
+  }
+  else {
+    params.push({ type: "text", text: data.name || "Customer" });
   }
   
   return [{ type: "body", parameters: params }];
 }
 
+// ----------------------------------------------------------------------
+// 2. MAIN AUTOMATION ENGINE (BATCH PROCESSING)
+// ----------------------------------------------------------------------
+
 export async function processTenantAutomation(tenantId: string) {
-  // 1. Fetch Tenant and their ACTIVE logic rules
   const tenant = await prisma.tenant.findUnique({ 
     where: { id: tenantId },
-    include: { automationRules: { where: { isActive: true } } } 
+    include: { automation_rules: { where: { is_active: true } } } 
   });
   
-  if (!tenant) throw new Error("Tenant configuration not found");
-  if (tenant.automationRules.length === 0) return { success: true, count: 0, message: "No active rules" };
+  if (!tenant) return { success: true };
+
+  const t = tenant as any;
+  let businessDisplayName = t.business_name || "Your Salon";
+  if (businessDisplayName.includes("http") || businessDisplayName.includes(".in") || businessDisplayName.includes(".com")) {
+      businessDisplayName = "Your Salon"; 
+  }
+
+  const businessPhone = t.business_phone || "919999999999"; 
+  const vendorBaseUrl = getVendorBaseUrl(tenantId);
+
+  if (!tenant.automation_rules || tenant.automation_rules.length === 0) return { success: true };
 
   let remoteDb: Connection | undefined;
+  
+  // 📦 JOB QUEUE
+  let pendingJobs: any[] = [];
 
+  // ======================================================
+  // PHASE 1: FETCH ALL PENDING MESSAGES (FAST)
+  // ======================================================
   try {
-    console.log(`\n🔍 --- MONITORING CYCLE START: ${tenant.businessName} ---`);
-    
+    console.log(`[${businessDisplayName}] 📡 Connecting to DB to fetch jobs...`);
     remoteDb = await mysql.createConnection({
-      host: tenant.dbHost,
-      user: tenant.dbUser,
-      password: tenant.dbPassword,
-      database: tenant.dbName,
-      port: parseInt(tenant.dbPort || "3306"),
-      connectTimeout: 5000,
+      host: tenant.db_host,
+      user: tenant.db_user,
+      password: tenant.db_password,
+      database: tenant.db_name,
+      port: parseInt(tenant.db_port || "3306"),
+      connectTimeout: 5000
     });
 
-    // 2. Table Verification
-    const requiredTables = [
-      'client', 'app_invoice_1', 'invoice_1', 
-      'customer_reward_points', 'membership_discount_history', 'service_reminder'
-    ];
-    
-    const existingTables: string[] = [];
-    for (const table of requiredTables) {
-      const [rows]: any = await remoteDb.query(`SHOW TABLES LIKE '${table}'`);
-      if (Array.isArray(rows) && rows.length > 0) existingTables.push(table);
-    }
+    const lookback = new Date(Date.now() - 10 * 60000).toISOString().slice(0, 19).replace('T', ' ');
 
-    const now = new Date();
-    const lookback5m = new Date(now.getTime() - 5 * 60000).toISOString().slice(0, 19).replace('T', ' ');
-    const reminderTarget = new Date(now.getTime() + 30 * 60000).toTimeString().slice(0, 8);
-    const detectedEvents: any[] = [];
+    for (const rule of tenant.automation_rules) {
+      const event = rule.event_type.toLowerCase();
+      let query = "";
+      let queryParams: any[] = [];
+      let dateCol = "updatetime"; 
+      let isRecurring = false; 
 
-    // --- HELPERS ---
-    const getBestDateColumn = async (db: Connection, table: string) => {
-      const [cols]: any = await db.query(`SHOW COLUMNS FROM ${table}`);
-      const colNames = cols.map((c: any) => c.Field.toLowerCase());
-      const priorities = ['updatetime', 'updated_at', 'entry_date', 'created_at', 'doa'];
-      return priorities.find(p => colNames.includes(p)) || null;
-    };
+      // --- QUERY LOGIC ---
+      if (event.includes("birthday")) {
+        query = `SELECT *, id as client_id, cont as phone FROM client WHERE DATE_FORMAT(dob, '%m-%d') = DATE_FORMAT(NOW(), '%m-%d')`;
+        isRecurring = true;
+      } else if (event.includes("anniversary")) {
+        query = `SELECT *, id as client_id, cont as phone FROM client WHERE DATE_FORMAT(aniversary, '%m-%d') = DATE_FORMAT(NOW(), '%m-%d')`;
+        isRecurring = true;
+      } else if (event.includes("enquiry") || event.includes("walkin")) {
+        query = `SELECT * FROM enquiry WHERE date >= ?`;
+        queryParams = [lookback];
+      } else if (event.includes("pending")) {
+        query = `SELECT t.*, c.name, c.cont as phone FROM invoice_1 t LEFT JOIN client c ON t.client = c.id WHERE t.updatetime >= ? AND t.pending > 0`; 
+        queryParams = [lookback];
+      } else if (event.includes("appointment reminder")) {
+        dateCol = "appdate";
+        const today = new Date().toISOString().slice(0, 10);
+        const timeCheck = new Date(new Date().getTime() + 30 * 60000).toTimeString().slice(0, 5); 
+        query = `SELECT t.*, c.name, c.cont as phone FROM app_invoice_1 t LEFT JOIN client c ON t.client = c.id WHERE t.appdate = ? AND t.itime LIKE ?`;
+        queryParams = [today, `${timeCheck}%`];
+      } else if (event.includes("appointment cancel")) {
+        query = `SELECT t.*, c.name, c.cont as phone FROM app_invoice_1 t LEFT JOIN client c ON t.client = c.id WHERE t.updatetime >= ? AND (t.status = 'Cancel' OR t.status = 'Deleted')`;
+        queryParams = [lookback];
+      } else if (event.includes("appointment re-schedule")) {
+        query = `SELECT t.*, c.name, c.cont as phone FROM app_invoice_1 t LEFT JOIN client c ON t.client = c.id WHERE t.updatetime >= ? AND t.status = 'Rescheduled'`;
+        queryParams = [lookback];
+      } else if (event.includes("new appointment")) {
+        query = `SELECT t.*, c.name, c.cont as phone FROM app_invoice_1 t LEFT JOIN client c ON t.client = c.id WHERE t.updatetime >= ? AND (t.status = 'Pending' OR t.status = 'Confirmed')`;
+        queryParams = [lookback];
+      } else if (event.includes("reward")) {
+        dateCol = "datetime"; 
+        query = `SELECT t.*, c.name, c.cont as phone FROM customer_reward_points t LEFT JOIN client c ON c.id = SUBSTRING_INDEX(t.client_id, ',', -1) WHERE t.datetime >= ? AND t.point_type = 1`;
+        queryParams = [lookback];
+      } else if (event.includes("membership")) {
+        dateCol = "time_update"; 
+        query = `SELECT t.*, c.name, c.cont as phone FROM membership_discount_history t LEFT JOIN client c ON c.id = SUBSTRING_INDEX(t.client_id, ',', -1) WHERE t.time_update >= ?`;
+        queryParams = [lookback];
+      } else if (event.includes("service reminder")) {
+        dateCol = "reminder_date";
+        query = `SELECT t.*, c.name, c.cont as phone FROM service_reminder t LEFT JOIN client c ON c.id = t.client_id WHERE t.reminder_date >= ?`;
+        queryParams = [lookback];
+      } else if (event.includes("new bill") || event.includes("feedback")) {
+        query = `SELECT t.*, c.name, c.cont as phone FROM invoice_1 t LEFT JOIN client c ON t.client = c.id WHERE t.updatetime >= ?`;
+        queryParams = [lookback];
+      }
 
-    const getCustomer = async (db: Connection, clientId: any) => {
-      if (!clientId) return { name: "Valued Customer", phone: "N/A" };
-      const [rows]: any = await db.execute(`SELECT name, cont, phone, mobile FROM client WHERE id = ?`, [clientId]);
-      const c = rows[0];
-      return c ? { 
-        name: c.name || "Valued Customer", 
-        phone: c.cont || c.phone || c.mobile || "N/A" 
-      } : { name: "Valued Customer", phone: "N/A" };
-    };
+      if (!query) continue;
 
-    // 🚀 --- EXECUTION LOGIC ---
-    const executeRule = async (eventType: string, data: any) => {
-      // Match event to saved rules
-      const rules = tenant.automationRules.filter(r => r.eventType === eventType);
-      
-      for (const rule of rules) {
-        // Deduplication: Ensure message isn't sent twice
-        const alreadySent = await prisma.automationLog.findFirst({
-          where: { tenantId, externalId: data.id.toString(), ruleId: rule.id }
-        });
+      try {
+        const [rows]: any = await remoteDb.execute(query, queryParams);
+        
+        for (const data of rows) {
+          const uniqueId = isRecurring ? `${data.id}_${new Date().getFullYear()}` : data.id.toString();
+          
+          // Check if already sent
+          const alreadySent = await prisma.automation_log.findFirst({
+            where: { tenant_id: tenantId, external_id: uniqueId, rule_id: rule.id }
+          });
 
-        if (!alreadySent) {
-          const components = getDynamicParams(eventType, data);
-          const phone = data.phone;
-
-          // Dispatch real WhatsApp via Meta
-          const result = await handleAutomatedWhatsApp(tenant, rule.templateName, components, phone);
-
-          if (result.success) {
-            await prisma.automationLog.create({
-              data: { tenantId, ruleId: rule.id, externalId: data.id.toString(), status: "SENT" }
+          if (!alreadySent) {
+            // Add to Queue
+            pendingJobs.push({
+               rule,
+               data,
+               uniqueId,
+               dateCol,
+               isRecurring
             });
-            console.log(`✅ SENT: ${rule.templateName} to ${data.name}`);
           }
         }
-      }
-    };
-
-    // --- 🚀 DETECTION HUB ---
-
-    // EVENTS 1, 2, 3: Appointments
-    if (existingTables.includes('app_invoice_1')) {
-      const dateCol = await getBestDateColumn(remoteDb, 'app_invoice_1');
-      if (dateCol) {
-        const [appts]: any = await remoteDb.execute(`SELECT * FROM app_invoice_1 WHERE ${dateCol} >= ?`, [lookback5m]);
-        for (const a of appts) {
-          const client = await getCustomer(remoteDb, a.client);
-          const fullData = { ...a, ...client };
-          let type = (a.status === 'cancelled' || a.is_cancelled == 1) ? 'Appointment cancel' : (a.status === 'rescheduled' ? 'Appointment re-schedule' : 'New appointment');
-          
-          console.log(`✨ [IDENTIFIED] ${type}: ID ${a.id} for ${client.name}`);
-          detectedEvents.push({ event: type, data: fullData });
-          await executeRule(type, fullData);
-        }
-      }
-
-      // EVENT 4: 30-Min Reminder Logic
-      const [rems]: any = await remoteDb.execute(
-        `SELECT * FROM app_invoice_1 WHERE appdate = CURDATE() AND itime <= ? AND itime > CURTIME() AND status != 'cancelled'`,
-        [reminderTarget]
-      );
-      for (const r of rems) {
-        const client = await getCustomer(remoteDb, r.client);
-        const fullData = { ...r, ...client };
-        console.log(`⏰ [TRIGGER] 30-MIN REMINDER: Appt ${r.id} for ${client.name}`);
-        detectedEvents.push({ event: 'Appointment reminder before 30 mins of appopintment', data: fullData });
-        await executeRule('Appointment reminder before 30 mins of appopintment', fullData);
+      } catch (err: any) {
+         console.warn(`⚠️ Query Skipped: ${err.message}`);
       }
     }
-
-    // EVENTS 5 & 8: New Bill & Feedback
-    if (existingTables.includes('invoice_1')) {
-      const dateCol = await getBestDateColumn(remoteDb, 'invoice_1');
-      if (dateCol) {
-        const [bills]: any = await remoteDb.execute(`SELECT * FROM invoice_1 WHERE ${dateCol} >= ?`, [lookback5m]);
-        for (const b of bills) {
-          const client = await getCustomer(remoteDb, b.client);
-          const fullData = { ...b, ...client };
-          console.log(`✨ [IDENTIFIED] NEW_BILL & FEEDBACK: ID ${b.id} for ${client.name}`);
-          
-          detectedEvents.push({ event: 'New bill', data: fullData });
-          await executeRule('New bill', fullData);
-
-          detectedEvents.push({ event: 'Feedback after 2 mins of new bill generation', data: fullData });
-          await executeRule('Feedback after 2 mins of new bill generation', fullData);
-        }
-      }
-    }
-
-    // EVENT 6: Reward Points
-    if (existingTables.includes('customer_reward_points')) {
-      const dateCol = await getBestDateColumn(remoteDb, 'customer_reward_points');
-      if (dateCol) {
-        const [points]: any = await remoteDb.execute(`SELECT * FROM customer_reward_points WHERE ${dateCol} >= ? AND point_type = 1`, [lookback5m]);
-        for (const p of points) {
-          const client = await getCustomer(remoteDb, p.client_id || p.client);
-          const fullData = { ...p, ...client };
-          detectedEvents.push({ event: 'Reward points granted / earned', data: fullData });
-          await executeRule('Reward points granted / earned', fullData);
-        }
-      }
-    }
-
-    // EVENT 7: Membership Buy
-    if (existingTables.includes('membership_discount_history')) {
-      const dateCol = await getBestDateColumn(remoteDb, 'membership_discount_history');
-      if (dateCol) {
-        const [mems]: any = await remoteDb.execute(`SELECT * FROM membership_discount_history WHERE ${dateCol} >= ?`, [lookback5m]);
-        for (const m of mems) {
-          const client = await getCustomer(remoteDb, m.client_id || m.client);
-          const fullData = { ...m, ...client };
-          detectedEvents.push({ event: 'membership buy', data: fullData });
-          await executeRule('membership buy', fullData);
-        }
-      }
-    }
-
-    // EVENT 9: Service Reminder
-    if (existingTables.includes('service_reminder')) {
-      const dateCol = await getBestDateColumn(remoteDb, 'service_reminder');
-      if (dateCol) {
-        const [reminders]: any = await remoteDb.execute(`SELECT * FROM service_reminder WHERE ${dateCol} >= ?`, [lookback5m]);
-        for (const sr of reminders) {
-          const client = await getCustomer(remoteDb, sr.client_id || sr.client);
-          const fullData = { ...sr, ...client };
-          detectedEvents.push({ event: 'Service reminder', data: fullData });
-          await executeRule('Service reminder', fullData);
-        }
-      }
-    }
-
-    await remoteDb.end();
-    console.log(`\n📊 CYCLE COMPLETE: Total ${detectedEvents.length} events processed.\n`);
-    return { success: true, count: detectedEvents.length, entries: detectedEvents };
-
   } catch (error: any) {
-    console.error(`💥 CRITICAL ERROR: ${error.message}`);
-    if (remoteDb) await remoteDb.end();
+    console.error(`💥 DB Connection Error:`, error.message);
     return { success: false, error: error.message };
+  } finally {
+    // 🔹 CLOSE DB CONNECTION NOW - Don't hold it open during sending
+    if (remoteDb) await remoteDb.end();
   }
+
+  // ======================================================
+  // PHASE 2: BATCH SENDING (SAFE & SLOW)
+  // ======================================================
+  
+  if (pendingJobs.length === 0) {
+    console.log(`[${businessDisplayName}] ✅ No new events to process.`);
+    return { success: true };
+  }
+
+  console.log(`[${businessDisplayName}] 🚀 Processing ${pendingJobs.length} jobs in batches...`);
+
+  // Process 1 by 1 (Strict Serial Mode) to prevent spam blocking
+  for (let i = 0; i < pendingJobs.length; i++) {
+    const job = pendingJobs[i];
+    const { rule, data, uniqueId, dateCol } = job;
+    
+    // Prepare Data
+    const rawDate = data[dateCol] || data.updatetime || data.dob || data.aniversary || data.date || new Date();
+    const formattedDate = new Date(rawDate).toLocaleDateString('en-IN', {
+        day: '2-digit', month: 'short', year: 'numeric'
+    });
+    const p_branch = Number(data.branch_id || 0);
+    const p_link = await getShortUrl(Number(data.id), p_branch, vendorBaseUrl);
+
+    // Prepare Params
+    const components = getDynamicParams(rule.event_type, {
+        ...data, 
+        appdate: formattedDate,
+        itime: data.itime || "",
+        short_link: p_link,
+    }, businessDisplayName);
+
+    // Send Message
+    const result = await handleAutomatedWhatsApp(tenant, rule.template_name, components, data.phone, "en");
+
+    if (result.success) {
+      await prisma.automation_log.create({
+        data: { tenant_id: tenantId, rule_id: rule.id, external_id: uniqueId, status: "SENT" }
+      });
+      console.log(`✅ (${i+1}/${pendingJobs.length}) SENT: "${rule.template_name}" to ${data.name}`);
+    } else {
+      console.error(`❌ FAILED sending to ${data.name}: ${result.error}`);
+    }
+
+    // ⏳ WAIT 15 SECONDS BETWEEN EACH MESSAGE (Safe Batching)
+    if (i < pendingJobs.length - 1) {
+        console.log(`⏳ Waiting 15s before next message...`);
+        await delay(15000); 
+    }
+  }
+
+  return { success: true };
 }

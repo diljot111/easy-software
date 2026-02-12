@@ -20,7 +20,8 @@ export async function loginUser(formData: FormData) {
   console.log("Authenticating:", email);
 
   try {
-    // 3. Database Lookup (Matches your schema.prisma 'User' model)
+    // 3. Database Lookup (Matches new 'model user' schema)
+    // 🔹 UPDATED: prisma.user (lowercase)
     const user = await prisma.user.findUnique({
       where: { email: email }
     });
@@ -40,7 +41,9 @@ export async function loginUser(formData: FormData) {
 
     // 5. Establish Session
     const cookieStore = await cookies();
-    cookieStore.set("userId", user.id, { 
+    
+    // 🔹 UPDATED: Converted user.id (Int) to String for the cookie
+    cookieStore.set("userId", String(user.id), { 
       httpOnly: true, 
       secure: process.env.NODE_SET === "production",
       sameSite: "lax",
@@ -53,7 +56,6 @@ export async function loginUser(formData: FormData) {
     });
 
     // 6. Define Redirect Path based on Role
-    // Using EASY_TEAM or ADMIN based on your specific requirements
     const path = (user.role === "ADMIN" || user.role === "EASY_TEAM") 
       ? "/admin/dashboard" 
       : "/dashboard";

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getAllClients, createClient } from "../../actions/client";
-import { Loader2, ChevronDown, UserPlus, X, Search } from "lucide-react";
+import { Loader2, ChevronDown, UserPlus, X, Search, Lock } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import Link from "next/link";
 import "./clients.css";
@@ -90,10 +90,34 @@ export default function ClientManagement() {
             </button>
             <h2 className="modal-title">Add New Client</h2>
             <form onSubmit={handleAddClient} className="modal-form">
-              <input name="name" required placeholder="Full Name" className="form-input" />
-              <input name="email" type="email" required placeholder="Email Address" className="form-input" />
-              <input name="number" required placeholder="Reference Client ID" className="form-input" />
-              <input name="phone" required placeholder="Phone Number" className="form-input" />
+              <div className="form-group">
+                <input name="name" required placeholder="Full Name" className="form-input" />
+              </div>
+              
+              <div className="form-group">
+                <input name="email" type="email" required placeholder="Email Address" className="form-input" />
+              </div>
+
+              {/* 🔐 NEW PASSWORD FIELD ADDED HERE */}
+              <div className="form-group relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                <input 
+                  name="password" 
+                  type="password" 
+                  required 
+                  placeholder="Assign Password" 
+                  className="form-input pl-10" 
+                />
+              </div>
+
+              <div className="form-group">
+                <input name="number" required placeholder="Reference Client ID" className="form-input" />
+              </div>
+
+              <div className="form-group">
+                <input name="phone" required placeholder="Phone Number" className="form-input" />
+              </div>
+
               <button disabled={isSubmitting} className="btn-submit">
                 {isSubmitting ? <Loader2 className="loading-spinner" size={18} /> : "Create Client"}
               </button>

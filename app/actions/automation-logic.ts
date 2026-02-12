@@ -16,17 +16,15 @@ function getVendorBaseUrl(tenantId: string) {
   return urlMap[tenantId] || urlMap["default"];
 }
 
-function encrypt_url(invoiceId: number) {
-  return (((invoiceId + 1000) * 7) + 5000) * 2;
+function encrypt_url(val: number) {
+  return (((val + 1000) * 7) + 5000) * 2;
 }
 
 async function getShortUrl(invoiceId: number, branchId: number, baseUrl: string) {
   let longUrl = "";
-  
   baseUrl = "https://2025.shivsoftsindia.in/live_demo/";
   const encryptedId = encrypt_url(invoiceId);
   const encryptedBranchId = encrypt_url(branchId);
-  // const shopId = process.env.DEFAULT_SHOP_ID || "240140"; 
   longUrl = `${baseUrl}/invoice.php?invMencr=${encryptedId}&invshopid=${encryptedBranchId}`;
 
   try {
@@ -50,265 +48,142 @@ async function getShortUrl(invoiceId: number, branchId: number, baseUrl: string)
 }
 
 // ----------------------------------------------------------------------
-// 2. MAIN AUTOMATION ENGINE
-// ----------------------------------------------------------------------
-
-export async function processTenantAutomation(tenantId: string) {
-  const tenant = await prisma.tenant.findUnique({ 
-    where: { id: tenantId },
-    include: { automationRules: { where: { isActive: true } } } 
-  });
-  
-  if (!tenant) return { success: true };
-
-  const t = tenant as any;
-  const businessDisplayName = t.businessName || "Our Business";
-  const businessPhone = t.businessPhone || "919999999999"; 
-  const vendorBaseUrl = getVendorBaseUrl(tenantId);
-
-  if (!tenant.automationRules || tenant.automationRules.length === 0) return { success: true };
-
-  let remoteDb: Connection | undefined;
-
-  try {
-    remoteDb = await mysql.createConnection({
-      host: tenant.dbHost,
-      user: tenant.dbUser,
-      password: tenant.dbPassword,
-      database: tenant.dbName, 
-      port: parseInt(tenant.dbPort || "3306"),
-    });
-
-    const lookback = new Date(Date.now() - 10 * 60000).toISOString().slice(0, 19).replace('T', ' ');
-
-    for (const rule of tenant.automationRules) {
-      const event = rule.eventType.toLowerCase();
-      let query = "";
-      let queryParams: any[] = [];
-      let dateCol = "updatetime"; 
-
-      // ---------------------------------------------------------
-      // 🧩 DYNAMIC EVENT ROUTING
-      // ---------------------------------------------------------
-      
-      if (event.includes("appointment reminder")) {
-        dateCol = "appdate";
-        const today = new Date().toISOString().slice(0, 10);
-        const now = new Date();
-        now.setMinutes(now.getMinutes() + 30);
-        const timeCheck = now.toTimeString().slice(0, 5); 
-
-        query = `SELECT t.*, c.name, c.cont as phone FROM app_invoice_1 t 
-                 LEFT JOIN client c ON t.client = c.id 
-                 WHERE t.appdate = ? AND t.itime LIKE ?`;
-        queryParams = [today, `${timeCheck}%`];
-
-      } else if (event.includes("appointment cancel")) {
-        query = `SELECT t.*, c.name, c.cont as phone FROM app_invoice_1 t 
-                 LEFT JOIN client c ON t.client = c.id 
-                 WHERE t.updatetime >= ? AND (t.status = 'Cancel' OR t.status = 'Deleted')`;
-        queryParams = [lookback];
-
-      } else if (event.includes("appointment re-schedule")) {
-        query = `SELECT t.*, c.name, c.cont as phone FROM app_invoice_1 t 
-                 LEFT JOIN client c ON t.client = c.id 
-                 WHERE t.updatetime >= ? AND t.status != 'Cancel'`;
-        queryParams = [lookback];
-
-      } else if (event.includes("new appointment")) {
-        query = `SELECT t.*, c.name, c.cont as phone FROM app_invoice_1 t 
-                 LEFT JOIN client c ON t.client = c.id 
-                 WHERE t.updatetime >= ?`;
-        queryParams = [lookback];
-
-      } else if (event.includes("reward")) {
-        // 🏆 REWARDS: 'cust,3' -> '3' using SUBSTRING_INDEX
-        dateCol = "datetime"; 
-        query = `SELECT t.*, c.name, c.cont as phone FROM customer_reward_points t 
-                 LEFT JOIN client c ON c.id = SUBSTRING_INDEX(t.client_id, ',', -1) 
-                 WHERE t.datetime >= ? AND t.point_type = 1`;
-        queryParams = [lookback];
-
-      } else if (event.includes("membership")) {
-        // 💳 MEMBERSHIP: 'cust,3' -> '3' using SUBSTRING_INDEX
-        dateCol = "time_update"; 
-        query = `SELECT t.*, c.name, c.cont as phone FROM membership_discount_history t 
-                 LEFT JOIN client c ON c.id = SUBSTRING_INDEX(t.client_id, ',', -1)
-                 WHERE t.time_update >= ?`;
-        queryParams = [lookback];
-
-      } else if (event.includes("service reminder")) {
-        // 🔔 REMINDER
-        dateCol = "reminder_date";
-        query = `SELECT t.*, c.name, c.cont as phone FROM service_reminder t 
-                 LEFT JOIN client c ON c.id = t.client_id 
-                 WHERE t.reminder_date >= ?`;
-        queryParams = [lookback];
-
-      } else if (event.includes("new bill") || event.includes("feedback")) {
-        // 🧾 BILL / FEEDBACK
-        query = `SELECT t.*, c.name, c.cont as phone FROM invoice_1 t 
-                 LEFT JOIN client c ON t.client = c.id 
-                 WHERE t.updatetime >= ?`;
-        queryParams = [lookback];
-      }
-
-      console.log(`[${businessDisplayName}] 🔎 Rule: "${rule.eventType}" | Querying...`);
-
-      if (!query) continue; 
-
-      // ---------------------------------------------------------
-      // 3. EXECUTE & PROCESS
-      // ---------------------------------------------------------
-      const [rows]: any = await remoteDb.execute(query, queryParams);
-
-      for (const data of rows) {
-        const alreadySent = await prisma.automationLog.findFirst({
-          where: { tenantId, externalId: data.id.toString(), ruleId: rule.id }
-        });
-
-        if (alreadySent) continue;
-
-        // 📝 PREPARE COMMON VARIABLES
-        const rawDate = data[dateCol] || data.updatetime || new Date();
-        const formattedDate = new Date(rawDate).toLocaleDateString('en-IN', {
-          day: '2-digit', month: 'short', year: 'numeric'
-        });
-        
-        const p_name = data.name || "Customer";
-        const p_time = data.itime || "";
-        const p_link = await getShortUrl(Number(data.id), data.branch_id, vendorBaseUrl);
-
-        // 🔹 TEMPLATE-SPECIFIC PARAMETER MAPPING
-        let params: string[] = [];
-
-        if (event.includes("reward") || event.includes("membership")) {
-           // 🏆 REWARD / MEMBERSHIP: 1 Param (Name)
-           params = [p_name];
-
-        } else if (event.includes("new bill")) {
-           // 🧾 NEW BILL (salon_billing): 2 Params (Name, Link)
-           // 🚨 FIXES #132000 ERROR (Expected 2, Got 4)
-           params = [p_name, p_link];
-
-        } else if (event.includes("re-schedule")) {
-           // 🔄 RESCHEDULE: 2 Params (Date, Time)
-           params = [formattedDate, p_time];
-
-        } else if (event.includes("new appointment")) {
-           // 📅 NEW APPT: 3 Params (Name, Date, Time)
-           params = [p_name, formattedDate, p_time];
-
-        } else if (event.includes("cancel")) {
-           // ❌ CANCEL: 2 Params (Name, Date)
-           params = [p_name, formattedDate];
-
-        } else {
-           // 🔔 DEFAULT (Feedback, etc): Standard 4 Params
-           params = [p_name, p_link, businessPhone, formattedDate];
-        }
-
-        const components = [{
-          type: "body",
-          parameters: params.map(val => ({ type: "text", text: String(val) }))
-        }];
-
-        const result = await handleAutomatedWhatsApp(tenant, rule.templateName, components, data.phone, "en");
-
-        if (result.success) {
-          await prisma.automationLog.create({
-            data: { tenantId, ruleId: rule.id, externalId: data.id.toString(), status: "SENT" }
-          });
-          console.log(`✅ [${businessDisplayName}] SENT: "${rule.templateName}" to ${data.name}`);
-        } else {
-          console.error(`❌ FAILED sending to ${data.name}: ${result.error}`);
-        }
-      }
-    }
-    return { success: true };
-  } catch (error: any) {
-    console.error(`💥 ERROR:`, error.message);
-    return { success: false, error: error.message };
-  } finally {
-    if (remoteDb) await remoteDb.end();
-  }
-}
-
-// ----------------------------------------------------------------------
-// 4. MANUAL TRIGGER
+// 2. TRIGGER AUTOMATION (Manual Test)
 // ----------------------------------------------------------------------
 
 export async function triggerAutomationManual(ruleId: string) {
   let remoteDb;
   try {
-    const rule = await prisma.automationRule.findUnique({
+    const rule = await prisma.automation_rule.findUnique({
       where: { id: ruleId },
       include: { tenant: true }
     });
     if (!rule || !rule.tenant) throw new Error("Rule not found.");
 
     const t = rule.tenant as any;
-    const businessPhone = t.businessPhone || "919999999999"; 
-    const vendorBaseUrl = getVendorBaseUrl(rule.tenant.id);
-    const event = rule.eventType.toLowerCase();
+    
+    // 🚨 FIX: Business Name logic
+    let businessName = t.business_name || "Your Salon";
+    if (businessName.includes("http") || businessName.includes(".in") || businessName.includes(".com")) {
+        businessName = "Your Salon";
+    }
 
+    const vendorBaseUrl = getVendorBaseUrl(rule.tenant.id);
+    const event = rule.event_type.toLowerCase();
+
+    // Default Dummy Payload
     let payload = { 
       name: "Test User", 
       phone: "919999999999", 
       date: new Date().toLocaleDateString('en-IN'), 
       time: "10:00 AM",
-      id: 0
+      points: "50",
+      details: "Service / Enquiry",
+      amount: "500",
+      id: 0,
+      branch_id: 0
     };
 
+    // 1. FETCH REAL DATA FROM DB
     try {
       remoteDb = await mysql.createConnection({
-        host: rule.tenant.dbHost,
-        user: rule.tenant.dbUser,
-        password: rule.tenant.dbPassword,
-        database: rule.tenant.dbName,
-        port: parseInt(rule.tenant.dbPort || "3306"),
+        host: rule.tenant.db_host,
+        user: rule.tenant.db_user,
+        password: rule.tenant.db_password,
+        database: rule.tenant.db_name,
+        port: parseInt(rule.tenant.db_port || "3306"),
       });
 
-      let table = "invoice_1";
+      let table = "invoice_1"; // Default
+      let customQuery = "";
+
       if (event.includes("appointment")) table = "app_invoice_1";
       else if (event.includes("reward")) table = "customer_reward_points";
       else if (event.includes("membership")) table = "membership_discount_history";
       else if (event.includes("service reminder")) table = "service_reminder";
+      else if (event.includes("birthday") || event.includes("anniversary")) table = "client";
+      else if (event.includes("enquiry") || event.includes("walkin")) table = "enquiry";
+      else if (event.includes("pending")) {
+          table = "invoice_1";
+          customQuery = `SELECT t.*, c.name, c.cont as phone FROM invoice_1 t LEFT JOIN client c ON t.client = c.id WHERE t.pending > 0 ORDER BY t.id DESC LIMIT 1`;
+      }
 
-      const [rows]: any = await remoteDb.execute(`SELECT * FROM ${table} ORDER BY id DESC LIMIT 1`);
+      let rows: any = [];
+      if (customQuery) {
+          [rows] = await remoteDb.execute(customQuery);
+      } else {
+          try {
+             [rows] = await remoteDb.execute(`SELECT * FROM ${table} ORDER BY id DESC LIMIT 1`);
+          } catch(err) {
+             console.warn(`Manual Test: Table ${table} not found.`);
+          }
+      }
       
       if (rows.length > 0) {
         const data = rows[0];
-        const rawDate = data.updatetime || data.datetime || data.time_update || new Date();
+        const rawDate = data.updatetime || data.datetime || data.time_update || data.dob || data.aniversary || data.date || new Date();
         
         payload = {
-          name: "Real Customer", 
-          phone: "919999999999",
+          name: data.name || "Real Customer", 
+          phone: data.cont || "919999999999", 
           date: new Date(rawDate).toLocaleDateString('en-IN'),
           time: data.itime || "10:00 AM",
-          id: data.id
+          points: String(data.points || "50"),
+          details: data.details || data.service || "Service",
+          amount: String(data.pending || data.net_amt || "500"),
+          id: data.id,
+          branch_id: Number(data.branch_id || 0)
         };
       }
-    } catch (e) { console.warn("Manual Test: DB fetch failed, using dummy data"); } 
-    finally { if (remoteDb) await remoteDb.end(); }
+    } catch (e) { 
+      console.warn("Manual Test: DB fetch failed, using dummy data"); 
+    } finally { 
+      if (remoteDb) await remoteDb.end(); 
+    }
 
-    const p_link = await getShortUrl(payload.id, 0, vendorBaseUrl);
+    const p_link = await getShortUrl(payload.id, payload.branch_id, vendorBaseUrl);
 
-    // 🔹 MANUAL TRIGGER MAPPING
+    // 2. STRICT PARAMETER MAPPING (Same as Engine)
     let params: string[] = [];
-    if (event.includes("reward") || event.includes("membership")) params = [payload.name];
-    else if (event.includes("new bill")) params = [payload.name, p_link];
-    else if (event.includes("re-schedule")) params = [payload.date, payload.time];
-    else if (event.includes("new appointment")) params = [payload.name, payload.date, payload.time];
-    else if (event.includes("cancel")) params = [payload.name, payload.date];
-    else params = [payload.name, p_link, businessPhone, payload.date];
+
+    if (event.includes("new bill") || event.includes("feedback")) {
+       params = [payload.name, p_link];
+    }
+    else if (event.includes("reward")) {
+      params = [payload.points]; 
+    } 
+    else if (event.includes("membership")) {
+      params = [businessName];
+    }
+    else if (event.includes("pending")) {
+        params = [payload.name, payload.amount, p_link];
+    }
+    else if (event.includes("appointment") || event.includes("reminder") || event.includes("confirmation")) {
+      params = [payload.name, payload.details, payload.time, businessName];
+    }
+    else if (event.includes("cancel")) {
+      params = [payload.date, businessName];
+    }
+    else if (event.includes("re-schedule")) {
+      params = [`${payload.date} at ${payload.time}`, businessName];
+    }
+    else if (event.includes("enquiry")) {
+        params = [payload.name, businessName];
+    }
+    else if (event.includes("birthday") || event.includes("anniversary")) {
+        params = [payload.name];
+    }
+    else {
+      // Fallback
+      params = [payload.name];
+    }
 
     const components = [{
       type: "body",
       parameters: params.map(val => ({ type: "text", text: String(val) }))
     }];
 
-    const result = await handleAutomatedWhatsApp(rule.tenant, rule.templateName, components, payload.phone, "en");
+    const result = await handleAutomatedWhatsApp(rule.tenant, rule.template_name, components, payload.phone, "en");
     return result.success ? { success: true } : { success: false, error: result.error };
 
   } catch (error: any) {
@@ -317,15 +192,15 @@ export async function triggerAutomationManual(ruleId: string) {
 }
 
 // ----------------------------------------------------------------------
-// 5. CRUD ACTIONS
+// 3. CRUD ACTIONS (Existing)
 // ----------------------------------------------------------------------
 
 export async function getClientAutomations(tenantId: string) {
   if (!tenantId) return [];
   try {
-    return await prisma.automationRule.findMany({
-      where: { tenantId: String(tenantId) },
-      include: { logs: { take: 5, orderBy: { createdAt: 'desc' } } }, 
+    return await prisma.automation_rule.findMany({
+      where: { tenant_id: String(tenantId) },
+      include: { logs: { take: 5, orderBy: { created_at: 'desc' } } }, 
       orderBy: { id: "desc" },
     });
   } catch (error) { return []; }
@@ -333,14 +208,14 @@ export async function getClientAutomations(tenantId: string) {
 
 export async function saveAutomationAction(tenantId: string, formData: FormData) {
   try {
-    await prisma.automationRule.create({
+    await prisma.automation_rule.create({
       data: {
-        tenantId: String(tenantId),
-        eventType: formData.get("eventType") as string,
-        templateName: formData.get("templateName") as string,
-        delayValue: parseInt((formData.get("delayValue") || "0").toString()),
-        delayUnit: (formData.get("delayUnit") || "Minutes").toString(),
-        isActive: true,
+        tenant_id: String(tenantId),
+        event_type: formData.get("eventType") as string,
+        template_name: formData.get("templateName") as string,
+        delay_value: parseInt((formData.get("delayValue") || "0").toString()),
+        delay_unit: (formData.get("delayUnit") || "Minutes").toString(),
+        is_active: true,
       },
     });
     revalidatePath(`/admin/clients/${tenantId}/automation`);
@@ -350,8 +225,11 @@ export async function saveAutomationAction(tenantId: string, formData: FormData)
 
 export async function deleteAutomationAction(ruleId: string, tenantId: string) {
   try {
-    await prisma.automationRule.delete({ where: { id: ruleId } });
+    await prisma.automation_log.deleteMany({ where: { rule_id: ruleId } });
+    await prisma.automation_rule.delete({ where: { id: ruleId } });
     revalidatePath(`/admin/clients/${tenantId}/automation`);
     return { success: true };
-  } catch (error) { return { success: false, error: "Failed." }; }
+  } catch (error: any) { 
+    return { success: false, error: "Failed to delete logic." }; 
+  }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { processTenantAutomation } from "@/app/actions/automation-logic";
+// 🔹 UPDATE: Import from 'automation-engine', not 'automation-logic'
+import { processTenantAutomation } from "@/app/actions/automation-engine";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
@@ -7,11 +8,11 @@ export async function GET() {
   console.log("\n🚀 --- GLOBAL SYNC START ---");
 
   try {
-    const tenants = await prisma.tenant.findMany({ select: { id: true, businessName: true } });
+    const tenants = await prisma.tenant.findMany({ select: { id: true, business_name: true } });
     console.log(`📡 Found ${tenants.length} tenants in database.`);
     
     for (const tenant of tenants) {
-      console.log(`\n⏳ Syncing: ${tenant.businessName} (${tenant.id})`);
+      console.log(`\n⏳ Syncing: ${tenant.business_name} (${tenant.id})`);
       await processTenantAutomation(tenant.id);
     }
 

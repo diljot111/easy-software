@@ -1,41 +1,48 @@
 "use client";
+
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, Save, Zap, Sparkles, Loader2, Clock, Search } from "lucide-react";
+import { ChevronLeft, Save, Zap, Sparkles, Loader2, Search } from "lucide-react";
 import Link from "next/link";
 import { toast, Toaster } from "sonner";
-import { saveAutomationAction } from "@/app/actions/automation-logic";
+// Ensure this path matches your project structure
+import { saveAutomationAction } from "@/app/actions/automation-logic"; 
 import { getClientConfig } from "@/app/actions/client"; 
 
 export default function NewAutomationPage() {
-  const { id } = useParams();
+  const params = useParams();
+  // Safe ID extraction (handles array or string)
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const router = useRouter();
   
   const [templates, setTemplates] = useState<{ name: string; status: string }[]>([]);
-  const [searchTerm, setSearchTerm] = useState(""); // 🔍 New state for search
+  const [searchTerm, setSearchTerm] = useState(""); 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   // 1. Fetch live Meta templates based on stored tenant credentials 
   useEffect(() => {
     async function loadData() {
+      if (!id) return;
+      
       try {
-        const configRes = await getClientConfig(id as string);
+        const configRes = await getClientConfig(id);
         if (!configRes.success || !configRes.config) {
           toast.error("Please configure WhatsApp settings first.");
           return;
         }
 
-        const { wabaId, metaToken } = configRes.config;
-        const cleanToken = metaToken?.trim().replace(/[\n\r]/g, "");
+        // 🔹 Access snake_case config fields
+        const { waba_id, meta_token } = configRes.config as any;
+        const cleanToken = meta_token?.trim().replace(/[\n\r]/g, "");
 
-        if (!wabaId || !cleanToken) {
+        if (!waba_id || !cleanToken) {
           toast.error("Missing WABA ID or Token in Settings.");
           return;
         }
 
         const metaRes = await fetch(
-          `https://graph.facebook.com/v18.0/${wabaId}/message_templates?limit=500`, 
+          `https://graph.facebook.com/v18.0/${waba_id}/message_templates?limit=500`, 
           { headers: { Authorization: `Bearer ${cleanToken}` } }
         );
         
@@ -64,8 +71,10 @@ export default function NewAutomationPage() {
 
   // 3. Handle form submission
   async function handleSubmit(formData: FormData) {
+    if (!id) return;
     setSaving(true);
-    const result = await saveAutomationAction(id as string, formData);
+
+    const result = await saveAutomationAction(id, formData);
     setSaving(false);
 
     if (result && 'error' in result && result.error) {
@@ -78,11 +87,18 @@ export default function NewAutomationPage() {
   }
 
   const salonEvents = [
-    "New appointment", "Appointment re-schedule", "Appointment cancel",
-    "Appointment reminder before 30 mins of appopintment", "New bill",
-    "Reward points granted / earned", "membership buy",
-    "Feedback after 2 mins of new bill generation", "Service reminder"
+    "New appointment", 
+    "Appointment re-schedule", 
+    "Appointment cancel",
+    "Appointment reminder before 30 mins of appopintment", // Typo matches backend logic
+    "New bill",
+    "Reward points granted / earned", 
+    "membership buy",
+    "Feedback after 2 mins of new bill generation", 
+    "Service reminder"
   ];
+
+  if (!id) return <div className="p-10 text-center">Loading System ID...</div>;
 
   return (
     <main className="min-h-screen bg-[#F9FAFB] text-slate-900 font-sans antialiased selection:bg-blue-100">
@@ -156,6 +172,8 @@ export default function NewAutomationPage() {
                       placeholder="Search for a template..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
+                      // 🛑 Prevent Form Submission on Enter
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
                       className="w-full pl-12 pr-4 py-3 bg-slate-50 border-2 border-transparent focus:border-blue-500 rounded-xl outline-none text-sm font-bold transition-all"
                     />
                   </div>

@@ -92,7 +92,9 @@ export default function EmployeeManagement() {
                   <tr key={user.id} className="hover:bg-slate-50/50">
                     <td className="px-8 py-5">
                       <p className="font-bold text-slate-900">{user.name}</p>
-                      <p className="text-[10px] text-slate-400 font-medium">ID: {user.id.slice(0, 8)}</p>
+                      <p className="text-[10px] text-slate-400 font-medium">
+                        ID: {String(user.id).slice(0, 8)}
+                      </p>
                     </td>
                     <td className="px-8 py-5">
                       <span className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">{user.role}</span>

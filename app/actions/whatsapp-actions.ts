@@ -1,8 +1,8 @@
 "use server";
 
 /**
- * EXECUTE: Sends the WhatsApp message via Meta Cloud API using tenant credentials.
- * FIX: Defaulted langCode to "en" to match Meta India registrations (Error #132001)
+ * EXECUTE: Sends the WhatsApp message via Meta Cloud API.
+ * This will print the FULL Meta JSON response to your terminal.
  */
 export async function handleAutomatedWhatsApp(
   tenant: any, 
@@ -12,12 +12,13 @@ export async function handleAutomatedWhatsApp(
   langCode: string = "en" 
 ) {
   try {
-    if (!tenant.metaToken || !tenant.phoneNumberId || !toNumber) {
-      console.warn(`⚠️ Credentials missing for tenant: ${tenant.businessName}`);
+    // 1. Database Credential Check
+    if (!tenant.meta_token || !tenant.phone_number_id || !toNumber) {
+      console.warn(`⚠️ Missing Meta credentials for: ${tenant.business_name}`);
       return { success: false, error: "Missing Credentials" };
     }
 
-    // Clean phone number: remove non-digits and ensure 12 digits for India
+    // 2. Format Phone Number
     let cleanPhone = toNumber.toString().replace(/\D/g, "");
     if (cleanPhone.length === 10) cleanPhone = "91" + cleanPhone;
 
@@ -32,32 +33,52 @@ export async function handleAutomatedWhatsApp(
       }
     };
 
-    // DEBUG LOG 1: Verify exact payload sent to Meta
-    console.log("📤 META PAYLOAD:", JSON.stringify(payload, null, 2));
+    console.log(`\n--- 📤 SENDING WHATSAPP TO: ${cleanPhone} ---`);
 
+    // 3. API Call
     const response = await fetch(
-      `https://graph.facebook.com/v18.0/${tenant.phoneNumberId}/messages`,
+      `https://graph.facebook.com/v18.0/${tenant.phone_number_id}/messages`,
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${tenant.metaToken}`,
+          "Authorization": `Bearer ${tenant.meta_token}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify(payload)
       }
     );
 
+    // 4. Capture the Full JSON Response
     const result = await response.json();
 
-    // DEBUG LOG 2: Catch detailed Meta rejection reasons
-    if (result.error) {
-      console.error("❌ META FULL ERROR:", JSON.stringify(result.error, null, 2));
-      throw new Error(result.error.message);
+    // 🔹 TERMINAL LOGGING: This is where you see the response in your terminal
+    console.log("---------------- META API RESPONSE ----------------");
+    console.log(`HTTP Status: ${response.status} ${response.statusText}`);
+    console.log(JSON.stringify(result, null, 2)); // <--- Prints full JSON formatted
+    console.log("---------------------------------------------------\n");
+
+    // 5. Check for Meta Errors
+    if (!response.ok || result.error) {
+      return { 
+        success: false, 
+        error: result.error?.message || "Meta API Error",
+        metaResponse: result 
+      };
     }
 
-    return { success: true, messageId: result.messages?.[0]?.id };
+    // 6. Success
+    return { 
+      success: true, 
+      messageId: result.messages?.[0]?.id,
+      metaResponse: result 
+    };
+
   } catch (error: any) {
-    console.error("❌ WhatsApp Action Failed:", error.message);
-    return { success: false, error: error.message };
+    console.error("❌ System Error in handleAutomatedWhatsApp:", error.message);
+    return { 
+      success: false, 
+      error: error.message,
+      metaResponse: { internal_system_error: error.message }
+    };
   }
 }

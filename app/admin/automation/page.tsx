@@ -1,20 +1,46 @@
 "use client";
+
 import { useState } from "react";
+import { useParams } from "next/navigation"; // 1. Import useParams
 import { 
   Play, Settings, Zap, History, 
-  Plus, Bot, Clock, Terminal 
+  Plus, Bot, Terminal 
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 
+// 2. Import the REAL backend action
+import { processTenantAutomation } from "@/app/actions/automation-logic"; 
+
 export default function SetAutomation() {
+  const { id } = useParams(); // 3. Get the Tenant ID from URL
   const [isDeploying, setIsDeploying] = useState(false);
 
-  const startAutomation = () => {
+  // 4. Update the function to call the Server Action
+  const startAutomation = async () => {
+    if (!id) {
+      toast.error("System Error: No Tenant ID found.");
+      return;
+    }
+
     setIsDeploying(true);
-    setTimeout(() => {
+    toast.info("Initializing automation sequence...");
+
+    try {
+      // 🚀 CALL REAL BACKEND LOGIC
+      // This runs the processTenantAutomation function you updated earlier
+      const result = await processTenantAutomation(id as string);
+
+      if (result.success) {
+        toast.success("Automation sequence completed successfully!");
+      } else {
+        toast.error(`Automation Failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Critical System Error.");
+    } finally {
       setIsDeploying(false);
-      toast.success("Automation sequence initiated.");
-    }, 2000);
+    }
   };
 
   return (
@@ -64,10 +90,10 @@ export default function SetAutomation() {
               <button 
                 onClick={startAutomation}
                 disabled={isDeploying}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-100 flex items-center justify-center gap-2 transition-all"
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-100 flex items-center justify-center gap-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {isDeploying ? <History className="animate-spin" /> : <Play size={18} />}
-                RUN AUTOMATION
+                {isDeploying ? "PROCESSING..." : "RUN AUTOMATION"}
               </button>
               <button className="px-6 py-4 border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-all">
                 <Settings size={20} />

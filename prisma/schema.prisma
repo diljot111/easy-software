@@ -14,71 +14,128 @@ enum Role {
   CUSTOMER
 }
 
-model User {
+// --------------------------------------
+// 👤 USER TABLE
+// --------------------------------------
+model user {
+  id              Int      @id @default(autoincrement())
+  name            String
+  email           String   @unique
+  phone           String?
+  password        String
+  role            Role     @default(EMPLOYEE)
+  
+  // 🔹 Snake_case fields
+  tenant_id       String?
+  created_by_id   Int?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+
+  // 🔹 Relations
+  tenant          tenant?  @relation(fields: [tenant_id], references: [id])
+  created_by      user?    @relation("UserCreator", fields: [created_by_id], references: [id])
+  created_users   user[]   @relation("UserCreator")
+  
+  login_activities login_activity[]
+}
+
+// --------------------------------------
+// 🏢 TENANT TABLE
+// --------------------------------------
+model tenant {
+  id               String   @id @default(cuid())
+  
+  // 🔹 Updated: Stores Website URL (mapped from 'business_name' input)
+  business_name    String
+  // 🆕 NEW FIELD: Stores 'Gym', 'Salon', etc.
+  business_type    String?  
+  business_phone   String?
+  
+  db_host          String
+  db_user          String
+  db_password      String
+  db_name          String
+  db_port          String?
+  
+  meta_token       String?  @db.Text
+  waba_id          String?
+  phone_number_id  String?
+
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now()) @updatedAt
+
+  // 🔹 Relations
+  users            user[]
+  automation_rules automation_rule[]
+  automation_logs  automation_log[]
+}
+
+// --------------------------------------
+// 🤖 AUTOMATION RULE TABLE
+// --------------------------------------
+model automation_rule {
+  id             String  @id @default(cuid())
+  
+  tenant_id      String
+  event_type     String
+  template_name  String
+  delay_value    Int     @default(0)
+  delay_unit     String  @default("Minutes")
+  is_active      Boolean @default(true)
+
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+  
+  // 🔹 Relations
+  tenant         tenant  @relation(fields: [tenant_id], references: [id])
+  logs           automation_log[]
+}
+
+// --------------------------------------
+// 📜 AUTOMATION LOG TABLE
+// --------------------------------------
+model automation_log {
   id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  phone        String?
-  password     String
-  role         Role     @default(EMPLOYEE)
-  createdAt    DateTime @default(now())
-  tenantId     String?
-  tenant       Tenant?  @relation(fields: [tenantId], references: [id])
-  createdById  String?
-  createdBy    User?    @relation("UserCreator", fields: [createdById], references: [id])
-  createdUsers User[]   @relation("UserCreator")
-}
-model Tenant {
-  id                String   @id @default(cuid())
-  businessName      String
-  businessPhone     String?
-  dbHost            String
-  dbUser            String
-  dbPassword        String
-  dbName            String
   
-  // Update this line to allow for longer tokens
-  metaToken         String?  @db.VarChar(255)
-  dbPort            String?
-  wabaId            String?
-  phoneNumberId     String
-  users             User[]
-  createdAt         DateTime @default(now())
-  automationRules   AutomationRule[]
-  automationLogs    AutomationLog[]
+  tenant_id    String
+  rule_id      String
+  external_id  String
+  status       String
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
+  
+  // 🔹 Relations
+  tenant       tenant          @relation(fields: [tenant_id], references: [id])
+  rule         automation_rule @relation(fields: [rule_id], references: [id])
 }
 
-model AutomationRule {
-  id           String   @id @default(cuid())
-  tenantId     String
-  eventType    String   
-  templateName String   
-  delayValue   Int      @default(0)
-  delayUnit    String   @default("Minutes")
-  isActive     Boolean  @default(true)
-  
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
-  logs         AutomationLog[]
-}
-
-model AutomationLog {
-  id         String   @id @default(cuid())
-  tenantId   String
-  ruleId     String
-  externalId String   // ID from the legacy SQL database (e.g., bill id)
-  status     String   // "SENT" or "FAILED"
-  createdAt  DateTime @default(now())
-  
-  tenant     Tenant   @relation(fields: [tenantId], references: [id])
-  rule       AutomationRule @relation(fields: [ruleId], references: [id])
-}
-
+// --------------------------------------
+// 👥 CLIENT TABLE
+// --------------------------------------
 model client {
-  id          Int      @id @default(autoincrement())
-  name        String?  @db.VarChar(111)
-  cont        String?  @db.VarChar(111)
-  email       String?  @db.VarChar(111)
-  active      Int?     @default(0)
-  branch_id   Int      @default(1)
-  doj         DateTime @default(now()) @db.Timestamp(0)
+  id         Int      @id @default(autoincrement())
+  name       String?  @db.VarChar(111)
+  cont       String?  @db.VarChar(111)
+  email      String?  @db.VarChar(111)
+  active     Int?     @default(0)
+  
+  branch_id  Int      @default(1)
+  doj        DateTime @default(now()) @db.Timestamp(0)
+  updated_at DateTime @default(now()) @updatedAt
+}
+
+// --------------------------------------
+// 🔐 LOGIN ACTIVITY TABLE
+// --------------------------------------
+model login_activity {
+  id         Int      @id @default(autoincrement())
+  
+  user_id    Int
+  ip         String
+  device     String
+  date_time  DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+  
+  // 🔹 Relation
+  user       user     @relation(fields: [user_id], references: [id])
 }

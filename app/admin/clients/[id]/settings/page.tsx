@@ -1,17 +1,22 @@
 "use client";
+
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, ShieldCheck, Database, Mail, Smartphone, MessageSquare, Save, Activity, RefreshCw, CheckCircle, AlertCircle, Table, Loader2, Send, Search } from "lucide-react";
+import { 
+  ChevronLeft, Database, MessageSquare, Save, Activity, 
+  CheckCircle, AlertCircle, Table, Loader2, Send, Search 
+} from "lucide-react";
 import { testRemoteConnection } from "../../../../actions/db-test";
 import { saveClientConfig, getClientConfig } from "../../../../actions/client";
 import { toast, Toaster } from "sonner";
-import "./settings.css";
+import "./settings.css"; // ✅ Correct CSS for Settings Page
 
 type TabType = "db" | "mail" | "sms" | "whatsapp";
 
 export default function ClientSettingsPage() {
-  const { id } = useParams();
+  const params = useParams();
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const formRef = useRef<HTMLFormElement>(null);
 
   const [activeTab, setActiveTab] = useState<TabType>("db");
@@ -24,8 +29,17 @@ export default function ClientSettingsPage() {
   const [isConnected, setIsConnected] = useState(false);
   const [initialData, setInitialData] = useState<any>(null);
 
+  const businessTypes = [
+    "Salon",
+    "Gym",
+    "Pet Clinic",
+    "Aesthetic Clinic",
+    "Car Detailing"
+  ];
+
   const fetchPersistentConfig = async () => {
-    const result = await getClientConfig(id as string);
+    if (!id) return;
+    const result = await getClientConfig(id);
     if (result.success && result.config) {
       setInitialData(result.config);
     }
@@ -71,15 +85,27 @@ export default function ClientSettingsPage() {
     setIsConnected(false);
 
     const formData = new FormData(formRef.current);
-    const wabaId = formData.get("whatsapp_business_id");
+    const wabaId = formData.get("whatsapp_business_id")?.toString().trim();
     const token = formData.get("whatsapp_token")?.toString().trim();
+
+    if (!wabaId || !token) {
+        toast.error("Please enter WABA ID and Token.");
+        setTesting(false);
+        return;
+    }
 
     try {
       const response = await fetch(`https://graph.facebook.com/v18.0/${wabaId}/message_templates?limit=500`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
-      if (data.error) throw new Error(data.error.message);
+      
+      if (data.error) {
+        if (data.error.message.includes("nonexisting field")) {
+            throw new Error("Invalid WABA ID. You likely entered a Phone Number ID instead of the Business Account ID.");
+        }
+        throw new Error(data.error.message);
+      }
 
       setWaTemplates(data.data || []);
       setIsWaVerified(true);
@@ -102,25 +128,7 @@ export default function ClientSettingsPage() {
     if (!testRecipient) return;
 
     const components: any[] = [];
-
-    const headerComp = template.components.find((c: any) => c.type === "HEADER");
-    if (headerComp) {
-      if (headerComp.format === "TEXT" && headerComp.text.includes("{{1}}")) {
-        components.push({
-          type: "header",
-          parameters: [{ type: "text", text: "Priority Update" }]
-        });
-      } else if (["IMAGE", "DOCUMENT", "VIDEO"].includes(headerComp.format)) {
-        components.push({
-          type: "header",
-          parameters: [{
-            type: headerComp.format.toLowerCase(),
-            [headerComp.format.toLowerCase()]: { link: "https://bit.ly/sample-wa-image" }
-          }]
-        });
-      }
-    }
-
+    // Basic template component logic...
     const bodyComp = template.components.find((c: any) => c.type === "BODY");
     if (bodyComp) {
       const varCount = (bodyComp.text.match(/{{[0-9]+}}/g) || []).length;
@@ -129,7 +137,7 @@ export default function ClientSettingsPage() {
           type: "body",
           parameters: Array.from({ length: varCount }, (_, i) => ({
             type: "text",
-            text: i === 0 ? "Valued Customer" : `TestValue_${i + 1}`
+            text: `TestValue_${i + 1}`
           }))
         });
       }
@@ -163,11 +171,11 @@ export default function ClientSettingsPage() {
   }
 
   async function handleSave() {
-    if (!formRef.current) return;
+    if (!formRef.current || !id) return;
     setSaving(true);
     try {
       const formData = new FormData(formRef.current);
-      const result = await saveClientConfig(id as string, formData);
+      const result = await saveClientConfig(id, formData);
       if (result.success) {
         toast.success(result.message);
         await fetchPersistentConfig();
@@ -178,6 +186,8 @@ export default function ClientSettingsPage() {
       setSaving(false);
     }
   }
+
+  if (!id) return <div className="p-10 text-center">Loading System ID...</div>;
 
   return (
     <main className="settings-main">
@@ -221,16 +231,41 @@ export default function ClientSettingsPage() {
             <form key={initialData?.id || 'loading'} ref={formRef} className="settings-form">
               {activeTab === "db" && (
                 <>
-                  <InputGroup name="website" label="Website URL" placeholder="https://client.com" defaultValue={initialData?.websiteUrl} />
-                  <div className="settings-form-row">
-                    <InputGroup name="host" label="Host Address" placeholder="127.0.0.1" defaultValue={initialData?.dbHost} />
-                    <InputGroup name="port" label="Port" placeholder="3306" defaultValue={initialData?.dbPort || "3306"} />
+                  {/* 🆕 Business Type */}
+                  <div className="settings-input-wrapper">
+                    <label className="settings-input-label">Business Type</label>
+                    <select 
+                      name="business_type"
+                      className="settings-input-field"
+                      defaultValue={initialData?.business_type || ""}
+                    >
+                      <option value="" disabled>Select Type</option>
+                      {businessTypes.map((type) => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                    </select>
                   </div>
-                  <InputGroup name="database" label="Database Name" placeholder="db_main" defaultValue={initialData?.dbName} />
+
+                  {/* 🆕 Website Link (Mapped to business_name) */}
+                  <InputGroup 
+                    name="business_name" 
+                    label="Website Link" 
+                    placeholder="https://client-website.com" 
+                    defaultValue={initialData?.business_name} 
+                  />
+                  
                   <div className="settings-form-row">
-                    <InputGroup name="user" label="DB User" placeholder="root" defaultValue={initialData?.dbUser} />
-                    <InputGroup name="password" label="Password" type="password" placeholder="••••••" defaultValue={initialData?.dbPassword} />
+                    <InputGroup name="host" label="Host Address" placeholder="127.0.0.1" defaultValue={initialData?.db_host} />
+                    <InputGroup name="port" label="Port" placeholder="3306" defaultValue={initialData?.db_port || "3306"} />
                   </div>
+                  
+                  <InputGroup name="database" label="Database Name" placeholder="db_main" defaultValue={initialData?.db_name} />
+                  
+                  <div className="settings-form-row">
+                    <InputGroup name="user" label="DB User" placeholder="root" defaultValue={initialData?.db_user} />
+                    <InputGroup name="password" label="Password" type="password" placeholder="••••••" defaultValue={initialData?.db_password} />
+                  </div>
+                  
                   <button type="button" onClick={handleTestConnection} disabled={testing} className="settings-btn-primary">
                     {testing ? <Loader2 size={14} className="settings-loading-icon" /> : <Database size={14} />}
                     {testing ? "Analyzing..." : "Verify DB Connection"}
@@ -240,9 +275,9 @@ export default function ClientSettingsPage() {
 
               {activeTab === "whatsapp" && (
                 <div className="settings-form">
-                  <InputGroup name="whatsapp_business_id" label="WABA ID" defaultValue={initialData?.wabaId} />
-                  <InputGroup name="whatsapp_phone_id" label="Phone ID" defaultValue={initialData?.phoneNumberId} />
-                  <InputGroup name="whatsapp_token" label="Permanent Access Token" type="text" autoComplete="off" defaultValue={initialData?.metaToken} />
+                  <InputGroup name="whatsapp_business_id" label="WABA ID (Template Sync)" defaultValue={initialData?.waba_id} />
+                  <InputGroup name="whatsapp_phone_id" label="Phone ID (Sending Messages)" defaultValue={initialData?.phone_number_id} />
+                  <InputGroup name="whatsapp_token" label="Permanent Access Token" type="text" autoComplete="off" defaultValue={initialData?.meta_token} />
                   <button
                     type="button"
                     onClick={handleFetchWhatsApp}
