@@ -3,18 +3,19 @@
 import mysql, { Connection } from "mysql2/promise";
 import { prisma } from "@/lib/prisma";
 import { handleAutomatedWhatsApp } from "./whatsapp-actions";
-
+import { getTemplateVariableCounts } from "@/lib/whatsapp-utils";
 /**
  * ----------------------------------------------------------------------
  * 1. CONFIGURATION & UTILS
  * ----------------------------------------------------------------------
  */
 
-function getVendorBaseUrl(tenantId: string) {
-  const urlMap: Record<string, string> = {
-    "default": "https://2025.shivsoftsindia.in/live_demo" 
+function getVendorBaseUrl(tenantId: number) {
+  // Map Tenant ID (Int) to their specific base URL if needed
+  const urlMap: Record<number, string> = {
+    1: "https://2025.shivsoftsindia.in/live_demo" // Example for ID 1
   };
-  return urlMap[tenantId] || urlMap["default"];
+  return urlMap[tenantId] || "https://2025.shivsoftsindia.in/live_demo";
 }
 
 function encrypt_url(val: number) {
@@ -26,10 +27,12 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function getShortUrl(invoiceId: number, branchId: number, baseUrl: string) {
   let longUrl = "";
-  baseUrl = "https://2025.shivsoftsindia.in/live_demo/";
+  // Ensure the base URL ends with a slash
+  const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  
   const encryptedId = encrypt_url(invoiceId);
   const encryptedBranchId = encrypt_url(branchId);
-  longUrl = `${baseUrl}/invoice.php?invMencr=${encryptedId}&invshopid=${encryptedBranchId}`;
+  longUrl = `${cleanBaseUrl}invoice.php?invMencr=${encryptedId}&invshopid=${encryptedBranchId}`;
 
   try {
     const response = await fetch("https://easyk.in/api.php", {
@@ -115,9 +118,13 @@ function getDynamicParams(eventType: string, data: any, businessName: string): a
 // 2. MAIN AUTOMATION ENGINE (BATCH PROCESSING)
 // ----------------------------------------------------------------------
 
-export async function processTenantAutomation(tenantId: string) {
+export async function processTenantAutomation(tenantId: number) {
+  // ✅ FIX: Ensure tenantId is an Integer
+  const id = Number(tenantId);
+  if (isNaN(id)) return { success: false, error: "Invalid Tenant ID" };
+
   const tenant = await prisma.tenant.findUnique({ 
-    where: { id: tenantId },
+    where: { id: id }, // ✅ Integer ID
     include: { automation_rules: { where: { is_active: true } } } 
   });
   
@@ -130,7 +137,7 @@ export async function processTenantAutomation(tenantId: string) {
   }
 
   const businessPhone = t.business_phone || "919999999999"; 
-  const vendorBaseUrl = getVendorBaseUrl(tenantId);
+  const vendorBaseUrl = getVendorBaseUrl(id);
 
   if (!tenant.automation_rules || tenant.automation_rules.length === 0) return { success: true };
 
@@ -149,7 +156,7 @@ export async function processTenantAutomation(tenantId: string) {
       user: tenant.db_user,
       password: tenant.db_password,
       database: tenant.db_name,
-      port: parseInt(tenant.db_port || "3306"),
+      port: Number(tenant.db_port) || 3306, // ✅ Force Integer Port
       connectTimeout: 5000
     });
 
@@ -217,7 +224,11 @@ export async function processTenantAutomation(tenantId: string) {
           
           // Check if already sent
           const alreadySent = await prisma.automation_log.findFirst({
-            where: { tenant_id: tenantId, external_id: uniqueId, rule_id: rule.id }
+            where: { 
+              tenant_id: id, // ✅ Integer
+              external_id: uniqueId, 
+              rule_id: rule.id // ✅ Integer
+            }
           });
 
           if (!alreadySent) {
@@ -267,7 +278,7 @@ export async function processTenantAutomation(tenantId: string) {
     const p_branch = Number(data.branch_id || 0);
     const p_link = await getShortUrl(Number(data.id), p_branch, vendorBaseUrl);
 
-    // Prepare Params
+    // Prepare Base Params
     const components = getDynamicParams(rule.event_type, {
         ...data, 
         appdate: formattedDate,
@@ -275,12 +286,41 @@ export async function processTenantAutomation(tenantId: string) {
         short_link: p_link,
     }, businessDisplayName);
 
+    // 🛡️ SMART VARIABLE MATCHER (Prevents Meta API crashes)
+    // 1. Fetch the exact template from your database
+    const templateData = await prisma.whatsapp_template.findUnique({
+      where: { 
+        tenant_id_name: { tenant_id: id, name: rule.template_name } 
+      }
+    });
+
+    if (templateData && templateData.components) {
+      // 2. Count how many variables Meta actually wants
+      const counts = getTemplateVariableCounts(templateData.components as any[]);
+      let bodyParams = components[0].parameters;
+
+      // 3. If we generated too FEW variables, add blanks so Meta doesn't crash
+      while (bodyParams.length < counts.bodyVars) {
+        bodyParams.push({ type: "text", text: "-" });
+      }
+      
+      // 4. If we generated too MANY variables, slice off the extras
+      if (bodyParams.length > counts.bodyVars) {
+        components[0].parameters = bodyParams.slice(0, counts.bodyVars);
+      }
+    }
+
     // Send Message
     const result = await handleAutomatedWhatsApp(tenant, rule.template_name, components, data.phone, "en");
 
     if (result.success) {
       await prisma.automation_log.create({
-        data: { tenant_id: tenantId, rule_id: rule.id, external_id: uniqueId, status: "SENT" }
+        data: { 
+          tenant_id: id, // ✅ Integer
+          rule_id: rule.id, // ✅ Integer
+          external_id: uniqueId, 
+          status: "SENT" 
+        }
       });
       console.log(`✅ (${i+1}/${pendingJobs.length}) SENT: "${rule.template_name}" to ${data.name}`);
     } else {

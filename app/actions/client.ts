@@ -12,12 +12,20 @@ export async function getAllClients() {
     });
     return { success: true, clients };
   } catch (error: any) {
+    console.error("Fetch Clients Error:", error);
     return { success: false, error: "Failed to fetch clients." };
   }
 }
 
-// 2. SAVE CLIENT CONFIGURATION (The Critical Fix)
-export async function saveClientConfig(clientId: string, formData: FormData) {
+// 2. SAVE CLIENT CONFIGURATION (Updated for Integer IDs)
+export async function saveClientConfig(clientId: string | number, formData: FormData) {
+  // Ensure ID is an integer
+  const id = typeof clientId === "string" ? parseInt(clientId) : clientId;
+
+  if (isNaN(id)) {
+    return { success: false, error: "Invalid Client ID" };
+  }
+
   // Extract Form Data
   const business_name = formData.get("business_name") as string | null;
   const business_type = formData.get("business_type") as string | null;
@@ -32,7 +40,7 @@ export async function saveClientConfig(clientId: string, formData: FormData) {
   const phoneId = formData.get("whatsapp_phone_id") as string | null;
   const metaToken = formData.get("whatsapp_token") as string | null;
 
-  // 🔹 Map to snake_case Schema Fields
+  // Prepare Update Object
   const dataToUpdate: any = {};
   if (business_name) dataToUpdate.business_name = business_name;
   if (business_type) dataToUpdate.business_type = business_type;
@@ -47,11 +55,11 @@ export async function saveClientConfig(clientId: string, formData: FormData) {
 
   try {
     await prisma.tenant.upsert({
-      where: { id: clientId },
+      where: { id: id }, // ✅ Using Integer ID
       update: dataToUpdate,
       create: {
-        id: clientId,
-        business_name: business_name || `Client_${clientId}`,
+        id: id, // ✅ Force the specific Integer ID
+        business_name: business_name || `Client_${id}`,
         business_type: business_type || "Salon",
         db_host: host || "localhost",
         db_name: dbName || "",
@@ -64,20 +72,30 @@ export async function saveClientConfig(clientId: string, formData: FormData) {
       },
     });
 
-    revalidatePath(`/admin/clients/${clientId}/settings`);
-    return { success: true, message: "Configuration saved to new DB tables." };
+    revalidatePath(`/admin/clients/${id}/settings`);
+    return { success: true, message: "Configuration saved successfully." };
   } catch (error: any) {
-    console.error("Save Error:", error);
-    return { success: false, error: "Database error." };
+    console.error("Save Config Error:", error);
+    return { success: false, error: "Database error during save." };
   }
 }
 
 // 3. GET CLIENT CONFIG
-export async function getClientConfig(clientId: string) {
+export async function getClientConfig(clientId: string | number) {
+  const id = typeof clientId === "string" ? parseInt(clientId) : clientId;
+  
+  if (isNaN(id)) return { success: false, error: "Invalid ID" };
+
   try {
-    const config = await prisma.tenant.findUnique({ where: { id: clientId } });
+    const config = await prisma.tenant.findUnique({ 
+      where: { id: id } // ✅ Using Integer ID
+    });
+    
+    if (!config) return { success: false, error: "Configuration not found" };
+    
     return { success: true, config };
   } catch (error) {
+    console.error("Get Config Error:", error);
     return { success: false, error: "Could not retrieve settings." };
   }
 }
@@ -90,25 +108,44 @@ export async function createClient(formData: FormData) {
     const phone = formData.get("phone") as string;
     const password = formData.get("password") as string;
 
-    if (!name || !email || !password) return { success: false, error: "Missing fields." };
+    if (!name || !email || !password) return { success: false, error: "Missing required fields." };
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return { success: false, error: "User already exists." };
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Transaction to create both Client entry and User login
     await prisma.$transaction(async (tx) => {
+      // 1. Create Legacy Client Record
       await tx.client.create({
-        data: { name, email, cont: phone, active: 1, branch_id: 1, doj: new Date() },
+        data: { 
+          name, 
+          email, 
+          cont: phone, 
+          active: 1, 
+          branch_id: 1, 
+          doj: new Date() 
+        },
       });
+
+      // 2. Create User Login (Linked to Default Tenant ID 1)
       await tx.user.create({
-        data: { name, email, password: hashedPassword, phone: phone, role: "CUSTOMER", tenant_id: "default-tenant" },
+        data: { 
+          name, 
+          email, 
+          password: hashedPassword, 
+          phone: phone, 
+          role: "CUSTOMER", 
+          tenant_id: 1 // ✅ Changed from "default-tenant" to 1 (Integer)
+        },
       });
     });
 
     revalidatePath("/admin/clients");
-    return { success: true, message: "Client created." };
+    return { success: true, message: "Client created successfully." };
   } catch (error: any) {
-    return { success: false, error: "Creation failed." };
+    console.error("Create Client Error:", error);
+    return { success: false, error: "Creation failed: " + error.message };
   }
 }

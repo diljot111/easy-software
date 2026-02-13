@@ -18,23 +18,23 @@ enum Role {
 // 👤 USER TABLE
 // --------------------------------------
 model user {
-  id              Int      @id @default(autoincrement())
-  name            String
-  email           String   @unique
-  phone           String?
-  password        String
-  role            Role     @default(EMPLOYEE)
+  id            Int      @id @default(autoincrement())
+  name          String
+  email         String   @unique
+  phone         String?
+  password      String
+  role          Role     @default(EMPLOYEE)
   
-  // 🔹 Snake_case fields
-  tenant_id       String?
-  created_by_id   Int?
-  created_at      DateTime @default(now())
-  updated_at      DateTime @default(now()) @updatedAt
+  // 🔹 CHANGED: tenant_id is now Int to match tenant.id
+  tenant_id     Int?
+  created_by_id Int?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
 
   // 🔹 Relations
-  tenant          tenant?  @relation(fields: [tenant_id], references: [id])
-  created_by      user?    @relation("UserCreator", fields: [created_by_id], references: [id])
-  created_users   user[]   @relation("UserCreator")
+  tenant        tenant?  @relation(fields: [tenant_id], references: [id])
+  created_by    user?    @relation("UserCreator", fields: [created_by_id], references: [id])
+  created_users user[]   @relation("UserCreator")
   
   login_activities login_activity[]
 }
@@ -43,74 +43,81 @@ model user {
 // 🏢 TENANT TABLE
 // --------------------------------------
 model tenant {
-  id               String   @id @default(cuid())
+  // 🔹 CHANGED: From String/cuid to Int/autoincrement
+  id              Int      @id @default(autoincrement())
   
-  // 🔹 Updated: Stores Website URL (mapped from 'business_name' input)
-  business_name    String
-  // 🆕 NEW FIELD: Stores 'Gym', 'Salon', etc.
-  business_type    String?  
-  business_phone   String?
+  business_name   String
+  business_type   String?
+  business_phone  String?
   
-  db_host          String
-  db_user          String
-  db_password      String
-  db_name          String
-  db_port          String?
+  db_host         String
+  db_user         String
+  db_password     String   // Kept your original field name
+  db_name         String
+  db_port         String?
   
-  meta_token       String?  @db.Text
-  waba_id          String?
-  phone_number_id  String?
+  meta_token      String?  @db.Text
+  waba_id         String?
+  phone_number_id String?
 
-  created_at       DateTime @default(now())
-  updated_at       DateTime @default(now()) @updatedAt
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
 
   // 🔹 Relations
-  users            user[]
-  automation_rules automation_rule[]
-  automation_logs  automation_log[]
+  users              user[]
+  automation_rules   automation_rule[]
+  automation_logs    automation_log[]
+  
+  // ✅ ADDED: Missing relation array for whatsapp_template
+  whatsapp_templates whatsapp_template[] 
 }
 
 // --------------------------------------
 // 🤖 AUTOMATION RULE TABLE
 // --------------------------------------
 model automation_rule {
-  id             String  @id @default(cuid())
+  // 🔹 CHANGED: From String/cuid to Int/autoincrement
+  id            Int      @id @default(autoincrement())
   
-  tenant_id      String
-  event_type     String
-  template_name  String
-  delay_value    Int     @default(0)
-  delay_unit     String  @default("Minutes")
-  is_active      Boolean @default(true)
+  // 🔹 CHANGED: Relation key is now Int
+  tenant_id     Int
+  event_type    String
+  template_name String
+  delay_value   Int      @default(0)
+  delay_unit    String   @default("Minutes")
+  is_active     Boolean  @default(true)
 
-  created_at     DateTime @default(now())
-  updated_at     DateTime @default(now()) @updatedAt
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
   
   // 🔹 Relations
-  tenant         tenant  @relation(fields: [tenant_id], references: [id])
-  logs           automation_log[]
+  tenant        tenant   @relation(fields: [tenant_id], references: [id])
+  logs          automation_log[]
 }
 
 // --------------------------------------
 // 📜 AUTOMATION LOG TABLE
 // --------------------------------------
 model automation_log {
-  id           String   @id @default(cuid())
+  // 🔹 CHANGED: From String/cuid to Int/autoincrement
+  id            Int      @id @default(autoincrement())
   
-  tenant_id    String
-  rule_id      String
-  external_id  String
-  status       String
-  created_at   DateTime @default(now())
-  updated_at   DateTime @default(now()) @updatedAt
+  // 🔹 CHANGED: Relation keys are now Int
+  tenant_id     Int
+  rule_id       Int
+  external_id   String
+  status        String
+  
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
   
   // 🔹 Relations
-  tenant       tenant          @relation(fields: [tenant_id], references: [id])
-  rule         automation_rule @relation(fields: [rule_id], references: [id])
+  tenant        tenant          @relation(fields: [tenant_id], references: [id])
+  rule          automation_rule @relation(fields: [rule_id], references: [id])
 }
 
 // --------------------------------------
-// 👥 CLIENT TABLE
+// 👥 CLIENT TABLE (Already correct)
 // --------------------------------------
 model client {
   id         Int      @id @default(autoincrement())
@@ -125,7 +132,7 @@ model client {
 }
 
 // --------------------------------------
-// 🔐 LOGIN ACTIVITY TABLE
+// 🔐 LOGIN ACTIVITY TABLE (Already correct)
 // --------------------------------------
 model login_activity {
   id         Int      @id @default(autoincrement())
@@ -138,4 +145,47 @@ model login_activity {
   
   // 🔹 Relation
   user       user     @relation(fields: [user_id], references: [id])
+}
+// --------------------------------------
+// 🧩 SYSTEM TEMPLATES
+// --------------------------------------
+model system_template {
+  id              Int      @id @default(autoincrement())
+  
+  name            String   
+  label           String   
+  category        String   
+  industry        String   
+  components      Json     
+  
+  // ✅ ADDED: Column to store variable count
+  total_variables Int      @default(0)
+  
+  created_at      DateTime @default(now())
+
+  @@map("system_template")
+}
+// --------------------------------------
+// 💬 WHATSAPP TEMPLATE (Synced from Meta)
+// --------------------------------------
+model whatsapp_template {
+  id              Int      @id @default(autoincrement())
+  tenant_id       Int
+  name            String
+  status          String   
+  category        String
+  language        String
+  components      Json
+  
+  total_variables Int      @default(0)
+  
+  // ✅ NEW: Store the dropdown selections and backend status
+  mappings        Json?    
+  is_mapped       Int      @default(0) 
+  
+  updated_at      DateTime @updatedAt
+
+  tenant          tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, name]) 
 }

@@ -9,11 +9,11 @@ import mysql, { Connection } from "mysql2/promise";
 // 1. CONFIGURATION & UTILS
 // ----------------------------------------------------------------------
 
-function getVendorBaseUrl(tenantId: string) {
-  const urlMap: Record<string, string> = {
-    "default": "https://2025.shivsoftsindia.in/live_demo" 
+function getVendorBaseUrl(tenantId: number) {
+  const urlMap: Record<number, string> = {
+    1: "https://2025.shivsoftsindia.in/live_demo" 
   };
-  return urlMap[tenantId] || urlMap["default"];
+  return urlMap[tenantId] || "https://2025.shivsoftsindia.in/live_demo";
 }
 
 function encrypt_url(val: number) {
@@ -22,10 +22,11 @@ function encrypt_url(val: number) {
 
 async function getShortUrl(invoiceId: number, branchId: number, baseUrl: string) {
   let longUrl = "";
-  baseUrl = "https://2025.shivsoftsindia.in/live_demo/";
+  const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  
   const encryptedId = encrypt_url(invoiceId);
   const encryptedBranchId = encrypt_url(branchId);
-  longUrl = `${baseUrl}/invoice.php?invMencr=${encryptedId}&invshopid=${encryptedBranchId}`;
+  longUrl = `${cleanBaseUrl}invoice.php?invMencr=${encryptedId}&invshopid=${encryptedBranchId}`;
 
   try {
     const response = await fetch("https://easyk.in/api.php", {
@@ -51,11 +52,15 @@ async function getShortUrl(invoiceId: number, branchId: number, baseUrl: string)
 // 2. TRIGGER AUTOMATION (Manual Test)
 // ----------------------------------------------------------------------
 
-export async function triggerAutomationManual(ruleId: string) {
+export async function triggerAutomationManual(ruleId: number | string) {
+  // ✅ FIX: Ensure Rule ID is an Integer
+  const rId = Number(ruleId);
+  if (isNaN(rId)) return { success: false, error: "Invalid Rule ID" };
+
   let remoteDb;
   try {
     const rule = await prisma.automation_rule.findUnique({
-      where: { id: ruleId },
+      where: { id: rId }, // ✅ Integer ID
       include: { tenant: true }
     });
     if (!rule || !rule.tenant) throw new Error("Rule not found.");
@@ -68,7 +73,7 @@ export async function triggerAutomationManual(ruleId: string) {
         businessName = "Your Salon";
     }
 
-    const vendorBaseUrl = getVendorBaseUrl(rule.tenant.id);
+    const vendorBaseUrl = getVendorBaseUrl(rule.tenant.id); // ID is already Int
     const event = rule.event_type.toLowerCase();
 
     // Default Dummy Payload
@@ -91,7 +96,7 @@ export async function triggerAutomationManual(ruleId: string) {
         user: rule.tenant.db_user,
         password: rule.tenant.db_password,
         database: rule.tenant.db_name,
-        port: parseInt(rule.tenant.db_port || "3306"),
+        port: Number(rule.tenant.db_port) || 3306, // ✅ Integer Port
       });
 
       let table = "invoice_1"; // Default
@@ -195,22 +200,29 @@ export async function triggerAutomationManual(ruleId: string) {
 // 3. CRUD ACTIONS (Existing)
 // ----------------------------------------------------------------------
 
-export async function getClientAutomations(tenantId: string) {
-  if (!tenantId) return [];
+export async function getClientAutomations(tenantId: number | string) {
+  // ✅ FIX: Ensure Tenant ID is Integer
+  const id = Number(tenantId);
+  if (isNaN(id)) return [];
+
   try {
     return await prisma.automation_rule.findMany({
-      where: { tenant_id: String(tenantId) },
+      where: { tenant_id: id }, // ✅ Integer
       include: { logs: { take: 5, orderBy: { created_at: 'desc' } } }, 
       orderBy: { id: "desc" },
     });
   } catch (error) { return []; }
 }
 
-export async function saveAutomationAction(tenantId: string, formData: FormData) {
+export async function saveAutomationAction(tenantId: number | string, formData: FormData) {
+  // ✅ FIX: Ensure Tenant ID is Integer
+  const id = Number(tenantId);
+  if (isNaN(id)) return { error: "Invalid Tenant ID" };
+
   try {
     await prisma.automation_rule.create({
       data: {
-        tenant_id: String(tenantId),
+        tenant_id: id, // ✅ Integer
         event_type: formData.get("eventType") as string,
         template_name: formData.get("templateName") as string,
         delay_value: parseInt((formData.get("delayValue") || "0").toString()),
@@ -218,16 +230,23 @@ export async function saveAutomationAction(tenantId: string, formData: FormData)
         is_active: true,
       },
     });
-    revalidatePath(`/admin/clients/${tenantId}/automation`);
+    revalidatePath(`/admin/clients/${id}/automation`);
     return { error: null };
-  } catch (error: any) { return { error: "Failed." }; }
+  } catch (error: any) { return { error: "Failed to save rule." }; }
 }
 
-export async function deleteAutomationAction(ruleId: string, tenantId: string) {
+export async function deleteAutomationAction(ruleId: number | string, tenantId: number | string) {
+  const rId = Number(ruleId);
+  const tId = Number(tenantId);
+  
+  if (isNaN(rId) || isNaN(tId)) return { success: false, error: "Invalid ID" };
+
   try {
-    await prisma.automation_log.deleteMany({ where: { rule_id: ruleId } });
-    await prisma.automation_rule.delete({ where: { id: ruleId } });
-    revalidatePath(`/admin/clients/${tenantId}/automation`);
+    // Delete logs first to respect Foreign Key constraints (if cascade isn't set)
+    await prisma.automation_log.deleteMany({ where: { rule_id: rId } });
+    await prisma.automation_rule.delete({ where: { id: rId } });
+    
+    revalidatePath(`/admin/clients/${tId}/automation`);
     return { success: true };
   } catch (error: any) { 
     return { success: false, error: "Failed to delete logic." }; 
