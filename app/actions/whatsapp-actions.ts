@@ -3,7 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { getTemplateVariableCounts } from "@/lib/whatsapp-utils"; // ✅ Added Import
-
+import mysql from 'mysql2/promise';
 /**
  * 1. EXECUTE: Sends the WhatsApp message via Meta Cloud API.
  * This will print the FULL Meta JSON response to your terminal.
@@ -270,5 +270,61 @@ export async function updateTemplateMapping(templateId: number, mappings: any, i
   } catch (error: any) {
     console.error("Failed to save mapping:", error);
     return { success: false, error: "Failed to save mapping to DB" };
+  }
+}
+
+/**
+ * 6. GET REMOTE DB SCHEMA: Fetches column names from key tables in the client's DB.
+ */
+export async function getRemoteDatabaseSchema(tenantId: number | string) {
+  const tId = Number(tenantId);
+  if (isNaN(tId)) return { success: false, columns: [] };
+
+  let connection;
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: tId } });
+    if (!tenant) return { success: false, error: "Tenant not found" };
+
+    connection = await mysql.createConnection({
+      host: tenant.db_host,
+      user: tenant.db_user,
+      password: tenant.db_password,
+      database: tenant.db_name,
+      port: Number(tenant.db_port) || 3306,
+      connectTimeout: 5000
+    });
+
+    // Tables to inspect for variables
+    const tablesOfInterest = [
+      'client', 
+      'invoice_1', 
+      'app_invoice_1', 
+      'enquiry',
+      'customer_reward_points'
+    ];
+
+    const placeholders = tablesOfInterest.map(() => '?').join(',');
+    const [rows]: any = await connection.execute(
+      `SELECT COLUMN_NAME, TABLE_NAME 
+       FROM INFORMATION_SCHEMA.COLUMNS 
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (${placeholders})`,
+      [tenant.db_name, ...tablesOfInterest]
+    );
+
+    // Flatten to unique column names (or keep table prefix if needed)
+    // For simplicity in the UI, we will return a list of objects
+    const columns = rows.map((r: any) => ({
+      name: r.COLUMN_NAME,
+      table: r.TABLE_NAME,
+      label: `${r.COLUMN_NAME} (${r.TABLE_NAME})`
+    }));
+
+    return { success: true, columns };
+
+  } catch (error: any) {
+    console.error("Schema Fetch Error:", error);
+    return { success: false, error: error.message, columns: [] };
+  } finally {
+    if (connection) await connection.end();
   }
 }

@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Plus, Trash2, Loader2, Edit, Save, X, Search, ChevronDown, Check } from "lucide-react";
@@ -9,17 +10,19 @@ import {
   deleteAutomationAction,
   saveAutomationAction
 } from "../../../../actions/automation-logic";
-import { getClientConfig } from "../../../../actions/client";
+import { getClientStoredTemplates } from "../../../../actions/whatsapp-actions"; 
 import "./automation.css";
 
-// --- 1. Custom Searchable Select (Updated with 'form' prop) ---
+// ============================================================================
+// 1. CUSTOM SEARCHABLE SELECT COMPONENT
+// ============================================================================
 function SearchableSelect({ 
   options, 
   value, 
   onChange, 
   placeholder, 
   name,
-  form // 👈 New Prop: required to link input to the form
+  form
 }: { 
   options: { name: string }[]; 
   value: string; 
@@ -32,6 +35,7 @@ function SearchableSelect({
   const [search, setSearch] = useState("");
   const wrapperRef = useRef<HTMLDivElement>(null);
 
+  // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
@@ -48,19 +52,21 @@ function SearchableSelect({
 
   return (
     <div className="relative w-full" ref={wrapperRef}>
-      {/* 🔹 FIXED: Added 'form' attribute so it works inside tables */}
+      {/* Hidden input to ensure value is submitted with the form */}
       <input type="hidden" name={name} value={value} form={form} />
 
+      {/* The Display Box */}
       <div 
         onClick={() => setIsOpen(!isOpen)}
         className="automation-custom-select-trigger"
       >
-        <span className={!value ? "text-gray-400" : ""}>
+        <span className={!value ? "text-gray-400" : "text-gray-700 font-medium"}>
           {value || placeholder}
         </span>
         <ChevronDown size={14} className="text-gray-500" />
       </div>
 
+      {/* The Dropdown List */}
       {isOpen && (
         <div className="automation-custom-select-dropdown">
           <div className="p-2 border-b border-gray-100 sticky top-0 bg-white z-10">
@@ -69,7 +75,7 @@ function SearchableSelect({
               <input 
                 autoFocus
                 type="text" 
-                placeholder="Search..." 
+                placeholder="Search templates..." 
                 className="bg-transparent border-none outline-none text-xs w-full text-gray-700 placeholder:text-gray-400"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -79,7 +85,7 @@ function SearchableSelect({
 
           <div className="max-h-48 overflow-y-auto">
             {filteredOptions.length === 0 ? (
-              <div className="p-3 text-xs text-gray-400 text-center">No results found</div>
+              <div className="p-3 text-xs text-gray-400 text-center italic">No active templates found</div>
             ) : (
               filteredOptions.map((opt) => (
                 <div 
@@ -103,13 +109,18 @@ function SearchableSelect({
   );
 }
 
-// --- 2. Main Component ---
+// ============================================================================
+// 2. MAIN PAGE COMPONENT
+// ============================================================================
 export default function ClientAutomationList() {
   const { id } = useParams();
   const [loading, setLoading] = useState(true);
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [automations, setAutomations] = useState<any[]>([]);
-  const [templates, setTemplates] = useState<{ name: string; status: string }[]>([]);
+  
+  // 🟢 Templates that are Approved AND Mapped (Green Tick)
+  const [readyTemplates, setReadyTemplates] = useState<{ name: string; status: string }[]>([]);
+  
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -120,7 +131,6 @@ export default function ClientAutomationList() {
     templateName: ""
   });
 
-  // 🔹 UPDATED: Added new events here
   const salonEvents = [
     "Birthday",
     "Anniversary",
@@ -139,40 +149,29 @@ export default function ClientAutomationList() {
 
   const channels = ["WhatsApp", "SMS", "Email"];
 
-  async function loadAutomations() {
+  // --- Load Data ---
+  async function loadData() {
     setLoading(true);
-    const data = await getClientAutomations(id as string);
-    setAutomations(Array.isArray(data) ? data : []);
+    
+    // 1. Fetch Automations
+    const autoData = await getClientAutomations(id as string);
+    setAutomations(Array.isArray(autoData) ? autoData : []);
+
+    // 2. Fetch Stored Templates from DB
+    const tmplResult = await getClientStoredTemplates(id as string);
+    if (tmplResult.success && tmplResult.templates) {
+        // 🟢 FILTER: Only show templates that are APPROVED + (Mapped OR No Variables needed)
+        const valid = tmplResult.templates.filter((t: any) => 
+            t.status === "APPROVED" && (t.is_mapped === 1 || t.total_variables === 0)
+        );
+        setReadyTemplates(valid);
+    }
+
     setLoading(false);
   }
 
-  async function loadTemplates() {
-    try {
-      const configRes = await getClientConfig(id as string);
-      if (!configRes.success || !configRes.config) {
-        toast.error("Please configure settings first.");
-        return;
-      }
-      const { waba_id, meta_token } = configRes.config as any;
-      const cleanToken = meta_token?.trim().replace(/[\n\r]/g, "");
-
-      if (waba_id && cleanToken) {
-        const metaRes = await fetch(
-          `https://graph.facebook.com/v18.0/${waba_id}/message_templates?limit=500`,
-          { headers: { Authorization: `Bearer ${cleanToken}` } }
-        );
-        const metaData = await metaRes.json();
-        const approved = metaData.data?.filter((t: any) => t.status === "APPROVED") || [];
-        setTemplates(approved);
-      }
-    } catch (err: any) {
-      console.error("Template Error:", err);
-    }
-  }
-
   useEffect(() => {
-    loadAutomations();
-    loadTemplates();
+    loadData();
   }, [id]);
 
   useEffect(() => {
@@ -181,6 +180,7 @@ export default function ClientAutomationList() {
     }
   }, [isCreating]);
 
+  // --- Search Logic ---
   const filteredAutomations = useMemo(() => {
     if (!searchTerm) return automations;
     return automations.filter(automation =>
@@ -189,6 +189,7 @@ export default function ClientAutomationList() {
     );
   }, [automations, searchTerm]);
 
+  // --- Handlers ---
   const handleRunNow = async (configId: string, eventName: string) => {
     setExecutingId(configId);
     try {
@@ -205,31 +206,30 @@ export default function ClientAutomationList() {
     toast.info("Deleting...");
     const result = await deleteAutomationAction(ruleId, id as string);
     if (result.success) toast.success("Deleted.");
-    else { toast.error("Failed."); loadAutomations(); }
+    else { toast.error("Failed to delete."); loadData(); }
   };
 
   const handleCreateNew = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSavingId("new");
-    const formData = new FormData(e.currentTarget); // ✅ Grab data BEFORE await
+    const formData = new FormData(e.currentTarget); 
     
     const result = await saveAutomationAction(id as string, formData);
     setSavingId(null);
 
     if (result && 'error' in result && result.error) toast.error(result.error);
-    else { toast.success("Created!"); setIsCreating(false); loadAutomations(); }
+    else { toast.success("Created!"); setIsCreating(false); loadData(); }
   };
 
   const handleSaveEdit = async (e: React.FormEvent<HTMLFormElement>, automationId: string) => {
     e.preventDefault();
-    // 🔹 FIXED: Capture the form reference immediately
     const formElement = e.currentTarget; 
     setSavingId(automationId);
 
     // 1. Delete old rule first
     await deleteAutomationAction(automationId, id as string);
 
-    // 2. Create new rule using captured form reference
+    // 2. Create new rule
     const formData = new FormData(formElement);
     const result = await saveAutomationAction(id as string, formData);
 
@@ -237,11 +237,11 @@ export default function ClientAutomationList() {
 
     if (result && 'error' in result && result.error) {
       toast.error(result.error);
-      loadAutomations();
+      loadData();
     } else {
       toast.success("Updated!");
       setEditingId(null);
-      loadAutomations();
+      loadData();
     }
   };
 
@@ -276,7 +276,7 @@ export default function ClientAutomationList() {
               <tr>
                 <th style={{width: '25%'}}>Trigger Event</th>
                 <th style={{width: '15%'}}>Channel</th>
-                <th style={{width: '30%'}}>Template</th>
+                <th style={{width: '30%'}}>Template (Green Tick Only)</th>
                 <th style={{width: '20%'}}>Delay</th>
                 <th style={{width: '10%'}}>Actions</th>
               </tr>
@@ -313,12 +313,12 @@ export default function ClientAutomationList() {
                   <td>
                     <div className="automation-form-field-column">
                       <span className="automation-form-label-small">Send Template</span>
-                      {/* 🔹 FIXED: Passed 'form' prop so hidden input works */}
+                      {/* 🟢 Searchable Select using ONLY Approved & Mapped Templates */}
                       <SearchableSelect 
                         name="templateName"
                         form="create-form"
-                        options={templates}
-                        placeholder="Search templates..."
+                        options={readyTemplates} 
+                        placeholder="Select mapped template..."
                         value={tempFormState.templateName}
                         onChange={(val) => setTempFormState({...tempFormState, templateName: val})}
                       />
@@ -381,12 +381,11 @@ export default function ClientAutomationList() {
                     <td>
                       <div className="automation-form-field-column">
                         <span className="automation-form-label-small">Send Template</span>
-                         {/* 🔹 FIXED: Passed 'form' prop */}
                          <SearchableSelect 
                             name="templateName"
                             form={`edit-form-${item.id}`}
-                            options={templates}
-                            placeholder="Search..."
+                            options={readyTemplates} // 🟢 Filtered list
+                            placeholder="Select mapped template..."
                             value={tempFormState.templateName || item.template_name}
                             onChange={(val) => setTempFormState({...tempFormState, templateName: val})}
                           />

@@ -49,7 +49,7 @@ model tenant {
   business_name   String
   business_type   String?
   business_phone  String?
-  
+  website_link  String? // 👈 Add this line
   db_host         String
   db_user         String
   db_password     String   // Kept your original field name

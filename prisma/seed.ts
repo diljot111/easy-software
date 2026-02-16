@@ -77,61 +77,126 @@ async function main() {
   console.log(`👉 Login: ${adminEmail} / admin123`);
 
   // ==========================================
-  // 2. SYSTEM TEMPLATES SETUP
+  // 2. SYSTEM TEMPLATES SETUP (SALON SPECIFIC)
   // ==========================================
   console.log("\n🌱 Seeding System Templates...");
 
   const templates = [
-    // --- SALON TEMPLATES ---
     {
-      name: "salon_appt_confirm_v2",
+      name: "salon_billing",
+      label: "E-Bill Generated",
+      category: "UTILITY",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "Your e-bill has been generated. You can view it here: {{1}}. {{2}} 💅" }
+      ]
+    },
+    {
+      name: "salon_appointment_confirmation",
       label: "Appointment Confirmation",
       category: "UTILITY",
       industry: "Salon",
       components: [
-        { type: "BODY", text: "Hello {{1}}, your appointment is confirmed for {{2}} at {{3}}. We look forward to seeing you at {{4}} soon.", example: { body_text: [["Rahul", "25th Aug", "10:00 AM", "Style Salon"]] } },
-        { type: "FOOTER", text: "Reply STOP to unsubscribe" }
+        { type: "BODY", text: "🗓️ Hello {{1}}, your appointment for {{2}} is confirmed for {{3}} at {{4}}. We look forward to pampering you! 💇‍♀️💆‍♀️ See you soon! 😊" }
       ]
     },
     {
-      name: "salon_bill_invoice_v2",
-      label: "Billing / Invoice",
+      name: "salon_add_enquiry",
+      label: "Enquiry Acknowledgement",
       category: "UTILITY",
       industry: "Salon",
       components: [
-        { type: "BODY", text: "Hi {{1}}, your bill of {{2}} has been generated. You can view the details here: {{3}} . Thank you for visiting {{4}} today.", example: { body_text: [["Rahul", "Rs. 500", "https://example.com/invoice", "Style Salon"]] } },
-        { type: "FOOTER", text: "Thank you for your business" }
+        { type: "BODY", text: "👋 Hi {{1}}, thank you for your interest in our salon! 💅💇 We have received your enquiry and will get back to you shortly. Feel free to reach out if you have any questions. 🌟" }
       ]
     },
     {
-      name: "salon_feedback_req_v2",
+      name: "salon_appointment_cancellation",
+      label: "Appointment Cancellation",
+      category: "UTILITY",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "Your appointment scheduled for {{1}} has been successfully canceled. {{2}} 💅" }
+      ]
+    },
+    {
+      name: "salon_appointment_reschedule",
+      label: "Appointment Rescheduled",
+      category: "UTILITY",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "Your appointment has been rescheduled to {{1}}.{{2}} 💅" }
+      ]
+    },
+    {
+      name: "salon_pending_payment_clearance",
+      label: "Payment Cleared",
+      category: "UTILITY",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "Your pending payment of {{1}} has been cleared. Your current balance is {{2}}. {{3}} 💅" }
+      ]
+    },
+    {
+      name: "salon_reward_points",
+      label: "Reward Points Update",
+      category: "UTILITY",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "🎁 Yay! Your reward points have been updated. 🎉 You now have {{1}} points in your account! 💖 Keep pampering yourself and earning more points! 🌟" }
+      ]
+    },
+    {
+      name: "salon_new_membership",
+      label: "Membership Welcome",
+      category: "UTILITY",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "Thank you for signing up for our membership. We are excited to have you with us. {{1}} 💅" }
+      ]
+    },
+    {
+      name: "salon_package_service_availed",
+      label: "Package Service Usage",
+      category: "UTILITY",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "You have availed a service under your package. Remaining services: {{1}}. {{2}} 💅" }
+      ]
+    },
+    {
+      name: "salon_birthday_wish",
+      label: "Birthday Wish",
+      category: "MARKETING",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "🎂 Happy Birthday, {{1}}! 🥳 Celebrate your special day with a complimentary {{2}} on us! 💖 Visit us anytime this week to avail the offer. 🎉" }
+      ]
+    },
+    {
+      name: "salon_anniversary_wish",
+      label: "Anniversary Wish",
+      category: "MARKETING",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "💍 Happy Anniversary, {{1}}! 💖 Celebrate with a 20% discount on your next service. 🥂 Use code: {{2}} when booking. Cheers to many more years of pampering! 💝" }
+      ]
+    },
+    {
+      name: "salon_service_reminder",
+      label: "Service Reminder",
+      category: "UTILITY",
+      industry: "Salon",
+      components: [
+        { type: "BODY", text: "📅 Hi {{1}} , it’s time for your next {{2}} session! 💆‍♀️ Book your slot at: {{3}} and stay fabulous! ✨" }
+      ]
+    },
+    {
+      name: "salon_feedback_request",
       label: "Feedback Request",
       category: "MARKETING",
       industry: "Salon",
       components: [
-        { type: "BODY", text: "Hi {{1}}, how was your experience at {{2}}? We would love to hear your feedback: {{3}} . Your opinion is very important to us!", example: { body_text: [["Rahul", "Style Salon", "https://example.com/feedback"]] } },
-        { type: "FOOTER", text: "Your feedback matters" }
-      ]
-    },
-    // --- GYM TEMPLATES ---
-    {
-      name: "gym_membership_alert",
-      label: "Membership Expiry Warning",
-      category: "UTILITY",
-      industry: "Gym",
-      components: [
-        { type: "BODY", text: "Hi {{1}}, your gym membership expires on {{2}}. Please renew by {{3}} to keep your access active. See you at {{4}}!", example: { body_text: [["John", "15th Sept", "14th Sept", "Iron Gym"]] } },
-        { type: "FOOTER", text: "Stay Fit" }
-      ]
-    },
-    // --- GENERIC / ALL ---
-    {
-      name: "generic_feedback_v1",
-      label: "General Feedback",
-      category: "MARKETING",
-      industry: "All",
-      components: [
-        { type: "BODY", text: "Hi {{1}}, we'd love to hear about your experience at {{2}}. Please rate us here: {{3}} . Thanks!", example: { body_text: [["User", "Business Name", "https://link.com"]] } }
+        { type: "BODY", text: "🌟 Hi {{1}}, we’d love to know how your recent experience was at our salon. ✨ Please take a moment to share your feedback here: {{2}}. Your feedback helps us serve you better! 🙏" }
       ]
     }
   ];

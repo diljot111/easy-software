@@ -1,43 +1,51 @@
 "use client";
 
 import { useState } from "react";
-import { useParams } from "next/navigation"; // 1. Import useParams
+import { useParams } from "next/navigation"; 
 import { 
   Play, Settings, Zap, History, 
-  Plus, Bot, Terminal 
+  Plus, Bot, Terminal, Loader2 
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 
-// 2. Import the REAL backend action
-import { processTenantAutomation } from "@/app/actions/automation-logic"; 
+// ✅ Import the engine
+import { processTenantAutomation } from "@/app/actions/automation-engine"; 
 
 export default function SetAutomation() {
-  const { id } = useParams(); // 3. Get the Tenant ID from URL
+  const params = useParams(); // Get params object
+  const id = params?.id; // Safely access ID
+  
   const [isDeploying, setIsDeploying] = useState(false);
 
-  // 4. Update the function to call the Server Action
   const startAutomation = async () => {
+    // 1. Validation: Ensure ID exists
     if (!id) {
-      toast.error("System Error: No Tenant ID found.");
+      toast.error("System Error: No Tenant ID found in URL.");
       return;
     }
 
     setIsDeploying(true);
-    toast.info("Initializing automation sequence...");
+    const toastId = toast.loading("Initializing automation sequence...");
 
     try {
+      // 2. Conversion: Convert String ID to Number for the backend
+      const tenantId = Number(id);
+      
+      if (isNaN(tenantId)) {
+        throw new Error("Invalid Tenant ID format");
+      }
+
       // 🚀 CALL REAL BACKEND LOGIC
-      // This runs the processTenantAutomation function you updated earlier
-      const result = await processTenantAutomation(id as string);
+      const result = await processTenantAutomation(tenantId);
 
       if (result.success) {
-        toast.success("Automation sequence completed successfully!");
+        toast.success("Automation sequence completed successfully!", { id: toastId });
       } else {
-        toast.error(`Automation Failed: ${result.error}`);
+        toast.error(`Automation Failed: ${result.error}`, { id: toastId });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error("Critical System Error.");
+      toast.error(`Critical Error: ${error.message}`, { id: toastId });
     } finally {
       setIsDeploying(false);
     }
@@ -51,7 +59,7 @@ export default function SetAutomation() {
         {/* Header */}
         <header className="flex justify-between items-end border-b border-slate-200 pb-6">
           <div>
-            <h1 className="text-3xl font-bold bold text-blue-600 uppercase tracking-tighter">Set Automation</h1>
+            <h1 className="text-3xl font-bold text-blue-600 uppercase tracking-tighter">Set Automation</h1>
             <p className="text-slate-500 font-medium text-sm mt-1 flex items-center gap-2">
               <Bot size={16} className="text-blue-500" /> Configure and deploy global automation agents.
             </p>
@@ -72,7 +80,7 @@ export default function SetAutomation() {
                 </div>
                 <div>
                   <h2 className="font-bold text-lg">Main Automation Agent</h2>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Python / Next.js Stack</p>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Node.js / MySQL Stack</p>
                 </div>
               </div>
               <span className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter border border-emerald-100">
@@ -92,7 +100,7 @@ export default function SetAutomation() {
                 disabled={isDeploying}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-100 flex items-center justify-center gap-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                {isDeploying ? <History className="animate-spin" /> : <Play size={18} />}
+                {isDeploying ? <Loader2 className="animate-spin" /> : <Play size={18} />}
                 {isDeploying ? "PROCESSING..." : "RUN AUTOMATION"}
               </button>
               <button className="px-6 py-4 border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-all">
@@ -106,9 +114,9 @@ export default function SetAutomation() {
             <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Live Logs</p>
               <div className="space-y-3">
-                <LogItem text="Watcher initialized" time="18:45" />
-                <LogItem text="SQL Connection Stable" time="18:40" />
-                <LogItem text="Token verified" time="18:30" />
+                <LogItem text="Watcher initialized" time="Now" />
+                <LogItem text="SQL Connection Stable" time="-2m" />
+                <LogItem text="System Ready" time="-5m" />
               </div>
             </div>
             
@@ -117,7 +125,7 @@ export default function SetAutomation() {
                 <Terminal size={14} className="text-blue-400" />
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Environment</p>
               </div>
-              <p className="text-xs font-mono text-blue-200">Production v2.4.0</p>
+              <p className="text-xs font-mono text-blue-200">Production v3.0.0</p>
             </div>
           </div>
         </div>
@@ -128,7 +136,7 @@ export default function SetAutomation() {
 
 function LogItem({ text, time }: { text: string; time: string }) {
   return (
-    <div className="flex justify-between items-center text-[11px] font-medium border-b border-slate-50 pb-2">
+    <div className="flex justify-between items-center text-[11px] font-medium border-b border-slate-50 pb-2 last:border-0">
       <span className="text-slate-600">{text}</span>
       <span className="text-slate-300 font-mono">{time}</span>
     </div>

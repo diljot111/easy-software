@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-// 🔹 UPDATE: Import from 'automation-engine', not 'automation-logic'
-import { processTenantAutomation } from "@/app/actions/automation-engine";
+// ✅ Correct Import Path
+import { processTenantAutomation } from "../../../actions/automation-engine"; 
+// OR if using absolute alias:
+// import { processTenantAutomation } from "@/app/actions/automation-engine";
+
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
