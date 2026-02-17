@@ -5,28 +5,7 @@ import { ShieldCheck, Users, LayoutDashboard } from "lucide-react";
 export default function SuperAdminDashboard() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
-      {/* --- MINIMALIST NAVBAR --- */}
-      <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <LayoutDashboard size={20} className="text-blue-600" />
-            <span className="font-bold tracking-tighter uppercase text-slate-900">
-              EasyK <span className="text-blue-600">Admin</span>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-6">
-            {/* NAVIGATION OPTION */}
-            <Link 
-              href="/admin/clients" 
-              className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-blue-600 transition-colors uppercase tracking-widest"
-            >
-              <Users size={18} />
-              Clients
-            </Link>
-          </div>
-        </div>
-      </nav>
+   
 
       {/* --- CONTENT AREA --- */}
       <div className="max-w-7xl mx-auto p-8 space-y-8">
